@@ -146,11 +146,5 @@ class ORMModel(ABC):
             This is an internal method typically called by Table.select().
             Users don't need to call it directly - use the Table interface instead.
         """
-        # If we have _columns (from ORMModel mixin), use them.
-        # Otherwise, fall back to pydantic model_fields.
-        # if hasattr(cls, "_columns"):
         columns = cls._columns
-        # else:
-        # columns = list(cls.model_fields.keys())
-
         return cls(**dict(zip(columns, row)))
