@@ -1,7 +1,7 @@
 """Time series database for high-volume append-heavy numerical data.
 
 This module provides a separate database layer optimized for time series data,
-which is fundamentally different from entity data (Publisher, Future, Contract).
+which is fundamentally different from entity data.
 
 Key Differences from ORM Database:
 - **Time series data**: Raw numerical observations, high-volume, append-heavy
@@ -39,23 +39,14 @@ class TimeSeriesDB:
     - Queried by time ranges and instrument IDs
     - Not entities with identity or relationships
 
-    This implements the TimeSeriesRepository protocol for use with domain models
-    like Future and Contract.
+    This implements the TimeSeriesRepository protocol for use with domain models.
 
     Example:
         # Separate databases for different concerns
-        metadata_db = Database()  # ORM for entities
-        ts_db = TimeSeriesDB()    # Time series data
-
-        # Create entity
-        future = Future(future_id=100, name="E-mini S&P 500", ticker="ES")
-        metadata_db.futures.insert(future)
-
-        # Ingest time series data
-        ts_db.ingest("future", price_data)
-
-        # Query time series through entity
-        df = future.get_timeseries_frame(ts_db)
+        # metadata_db = DB(tables_map={"foo": partial(Table, model_class=FooORM)})
+        # ts_db = TimeSeriesDB()
+        # ts_db.ingest(Foo.table_name, price_data)
+        # df = foo.get_timeseries_frame(ts_db)
     """
 
     def __init__(self, path: str | Path | None = None, time_col="timestamp"):

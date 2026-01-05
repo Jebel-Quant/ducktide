@@ -17,11 +17,11 @@ class Table:
     """Table interface for database operations following the Repository pattern.
 
     This class provides a consistent API for all CRUD operations on a database
-    table. Each table is associated with a model class (Publisher, Future, or
-    Contract) and provides methods for inserting, querying, and exporting data.
+    table. Each table is associated with a model class and provides methods
+    for inserting, querying, and exporting data.
 
     All database operations in this ORM go through Table instances, which are
-    accessed via the Database class (e.g., db.publisher, db.futures, db.contracts).
+    accessed via the Database class (e.g., db.table_name).
     Models themselves do NOT have persistence methods.
 
     Key Methods:
@@ -36,18 +36,19 @@ class Table:
         from_parquet(path): Import from Parquet
 
     Example:
-        db = Database()
-        publisher = Publisher(publisher_id=1, name="CME", dataset="GLBX.MDP3", venue="GLBX")
+        db = DB(tables_map={...})
+        model = ModelClass(id=1, name="Example", ...)
 
         # Insert
-        db.publisher.insert(publisher)
+        db.insert(model)
 
         # Query
-        all_pubs = db.publisher.select()
-        glbx_pubs = db.publisher.select("venue = ?", ["GLBX"])
+        # table = db.get_table(ModelClass)
+        # all_items = table.select()
+        # filtered = table.select("status = ?", ["active"])
 
         # Export
-        db.publisher.to_csv("publishers.csv")
+        # table.to_csv("data.csv")
     """
 
     def __init__(self, connection: duckdb.DuckDBPyConnection, model_class: type, read_only: bool = False):
@@ -58,7 +59,7 @@ class Table:
         connection:
             Active DuckDB connection used to execute queries.
         model_class:
-            The ORM model class (e.g., ``PublisherORM``) providing
+            The ORM model class (e.g., ``ModelORM``) providing
             ``_table_name``, ``_columns``, ``_primary_key``,
             ``generate_create_table_sql()`` and ``from_row(...)``.
         read_only:
@@ -70,8 +71,7 @@ class Table:
         self.columns = tuple(model_class._columns)
         self.pk = model_class._primary_key
 
-        # def _initialize_schema(self) -> None:
-        # for orm in (PublisherORM, FutureORM, ContractORM):
+        # Initialize schema if not read-only
         if not read_only:
             self.connection.execute(model_class.generate_create_table_sql())
 
@@ -79,9 +79,8 @@ class Table:
 
     def _values_from_obj(self, obj) -> tuple:
         # Check if obj is an instance of model_class or its base domain class
-        # This allows both Publisher and PublisherORM to be inserted into a Table(model_class=PublisherORM)
-        # We check the __mro__ of model_class to find the domain model (which is a base of ORM model)
-        # or just check if it has the required attributes.
+        # This allows both domain models and ORM models to be inserted into a Table
+        # We check if the object has all required columns as attributes.
         # For simplicity and robustness, we allow any object that has all required columns as attributes.
         try:
             return tuple(getattr(obj, col) for col in self.columns)
@@ -99,22 +98,24 @@ class Table:
         to bulk_insert() for better performance.
 
         Args:
-            *objs: One or more model instances (Publisher, Future, or Contract).
+            *objs: One or more model instances.
                 Can be either domain models or their ORM equivalents.
 
-        Examples:
-            >>> from jqr.orm import Database
-            >>> from jqr.orm.models import Publisher
-            >>> db = Database()
+        Example:
+            >>> from functools import partial
+            >>> from jqr.database.db import DB
+            >>> from jqr.database.orm.example import FooORM
+            >>> from jqr.database.table import Table
             >>>
-            >>> # Insert a single publisher
-            >>> publisher = Publisher(publisher_id=1, name="CME", dataset="GLBX.MDP3", venue="GLBX")
-            >>> db.publisher.insert(publisher)
+            >>> db = DB(tables_map={"foo": partial(Table, model_class=FooORM)})
+            >>> foo1 = FooORM(id=1, name="apple")
+            >>> foo2 = FooORM(id=2, name="banana")
+            >>> db.insert(foo1, foo2)
             >>>
-            >>> # Insert multiple publishers at once
-            >>> pub1 = Publisher(publisher_id=2, name="ICE", dataset="ICE.DATA", venue="ICE")
-            >>> pub2 = Publisher(publisher_id=3, name="CBOE", dataset="CBOE.DATA", venue="CBOE")
-            >>> db.publisher.insert(pub1, pub2)
+            >>> # Verify insertion
+            >>> table = db.table[FooORM]
+            >>> len(table.select())
+            2
 
         Note:
             When inserting multiple objects, consider using bulk_insert() directly
@@ -149,23 +150,24 @@ class Table:
             An iterable of model instances whose attributes map to the
             table's column order defined in ``self.columns``.
 
-        Examples:
-            >>> from jqr.orm import Database
-            >>> from jqr.orm.models import Future
-            >>> db = Database()
+        Example:
+            >>> from functools import partial
+            >>> from jqr.database.db import DB
+            >>> from jqr.database.orm.example import FooORM
+            >>> from jqr.database.table import Table
             >>>
-            >>> # Create a list of futures to insert
-            >>> futures = [
-            ...     Future(future_id=i, name=f"Future {i}", ticker=f"F{i}", publisher_id=1)
-            ...     for i in range(2, 1002)
-            ... ]
+            >>> db = DB(tables_map={"foo": partial(Table, model_class=FooORM)})
             >>>
-            >>> # Ensure publisher exists for foreign key constraint
-            >>> from jqr.orm.models import Publisher
-            >>> db.publisher.insert(Publisher(publisher_id=1, name="CME", dataset="GLBX.MDP3", venue="GLBX"))
+            >>> # Create multiple Foo instances
+            >>> foos = [FooORM(id=i, name=f"item_{i}") for i in range(1, 101)]
             >>>
-            >>> # Bulk insert all 1000 futures efficiently
-            >>> db.futures.bulk_insert(futures)
+            >>> # Bulk insert for efficient batch processing
+            >>> table = db.table[FooORM]
+            >>> table.bulk_insert(foos)
+            >>>
+            >>> # Verify all items were inserted
+            >>> len(table.select())
+            100
 
         Performance:
             For inserting 1000+ records, bulk_insert() can be 10-100x faster
@@ -217,36 +219,30 @@ class Table:
             A list of instantiated domain/ORM model objects created via
             ``model_class.from_row``.
 
-        Examples:
-        --------
-        >>> from jqr.orm import Database
-        >>> from jqr.orm.models import Publisher, Future
-        >>> from datetime import date
-        >>> db = Database()
-        >>>
-        >>> # Select all publishers
-        >>> all_publishers = db.publisher.select()
-        >>>
-        >>> # Select publishers by venue
-        >>> cme_publishers = db.publisher.select("venue = ?", ["GLBX"])
-        >>>
-        >>> # Select with multiple conditions
-        >>> active_futures = db.futures.select(
-        ...     "asset_class = ? AND currency = ?",
-        ...     ["Equity Index", "USD"]
-        ... )
-        >>>
-        >>> # Select contracts by date range
-        >>> march_contracts = db.contracts.select(
-        ...     "expiry >= ? AND expiry < ?",
-        ...     [date(2025, 3, 1), date(2025, 4, 1)]
-        ... )
-        >>>
-        >>> # Select with ORDER BY
-        >>> sorted_contracts = db.contracts.select(
-        ...     "future_id = ? ORDER BY expiry ASC",
-        ...     [100]
-        ... )
+        Example:
+            >>> from functools import partial
+            >>> from jqr.database.db import DB
+            >>> from jqr.database.orm.example import FooORM
+            >>> from jqr.database.table import Table
+            >>>
+            >>> db = DB(tables_map={"foo": partial(Table, model_class=FooORM)})
+            >>> db.insert(FooORM(id=1, name="apple"), FooORM(id=2, name="banana"), FooORM(id=3, name="cherry"))
+            >>>
+            >>> table = db.table[FooORM]
+            >>> # Select all items
+            >>> all_foos = table.select()
+            >>> len(all_foos)
+            3
+            >>>
+            >>> # Select with filter using parameterized query
+            >>> filtered = table.select("name = ?", ["apple"])
+            >>> filtered[0].name
+            'apple'
+            >>>
+            >>> # Select with ORDER BY
+            >>> ordered = table.select("id > ? ORDER BY name DESC", [0])
+            >>> [f.name for f in ordered]
+            ['cherry', 'banana', 'apple']
 
         Note:
         ----

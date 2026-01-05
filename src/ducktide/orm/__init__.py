@@ -16,3 +16,7 @@ Note:
     operations must go through the Database table interface, following the
     Repository pattern.
 """
+
+from .base import DomainModel, ORMModel
+
+__all__ = ["DomainModel", "ORMModel"]

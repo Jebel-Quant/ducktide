@@ -18,19 +18,22 @@ from .timeseries_repo import TimeSeriesRepository
 
 
 class TimeSeriesModel(ABC):
-    """Abstract base class for domain models exposing time series data."""
+    """Abstract base class for domain models exposing time series data.
+
+    Subclasses must provide an `instrument_id` property and a `table_name`
+    property. The latter is often automatically provided if the model
+    inherits from `DomainModel`.
+    """
 
     @property
     @abstractmethod
     def table_name(self) -> str:
         """The name of the table containing this model's time series data."""
-        ...
 
     @property
     @abstractmethod
     def instrument_id(self) -> int | None:
         """The ID used to identify this instrument in time series data."""
-        ...
 
     def get_timeseries_frame(
         self,

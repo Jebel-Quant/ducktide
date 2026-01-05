@@ -18,15 +18,45 @@ class DB:
     Provides basic connection management, query execution, and context manager
     support. This class is intended to be used as a base for more specialized
     database implementations and does not contain any model or table specific logic.
+
+    Example:
+        >>> from functools import partial
+        >>> from jqr.database.db import DB
+        >>> from jqr.database.orm.example import FooORM, Foo
+        >>> from jqr.database.table import Table
+        >>>
+        >>> # Initialize with a mapping of attribute names to table classes
+        >>> db = DB(tables_map={"foo": partial(Table, model_class=FooORM)})
+        >>>
+        >>> # Tables are accessible as attributes
+        >>> isinstance(db.foo, Table)
+        True
+        >>>
+        >>> # Insert domain models directly
+        >>> db.insert(Foo(id=1, name="apple"))
+        >>> len(db.foo.select())
+        1
     """
 
     def __init__(self, tables_map: dict[str, type], db_path: str = ":memory:", read_only: bool = False):
         """Initialize the DB with either in-memory or persistent storage.
 
-        :param tables_map: Mapping of attribute names to table classes
-            to be initialized automatically.
-        :param db_path: Path to the database file, or ":memory:" for in-memory.
-        :param read_only: If True, open the database in read-only mode.
+        Args:
+            tables_map: Mapping of attribute names to table classes
+                to be initialized automatically. These are typically
+                `partial(Table, model_class=ModelORM)`.
+            db_path: Path to the database file, or ":memory:" for in-memory.
+            read_only: If True, open the database in read-only mode.
+
+        Example:
+            >>> from functools import partial
+            >>> from jqr.database.db import DB
+            >>> from jqr.database.orm.example import FooORM
+            >>> from jqr.database.table import Table
+            >>>
+            >>> db = DB(tables_map={"foo": partial(Table, model_class=FooORM)})
+            >>> db.db_path
+            ':memory:'
         """
         self.db_path = db_path
         self.read_only = read_only
@@ -38,10 +68,27 @@ class DB:
     def insert(self, *objs: Any):
         """Insert one or more objects into their respective tables.
 
-        Parameters
-        ----------
-        *objs:
-            Objects to be inserted.
+        The method automatically routes each object to the correct table based
+        on its type (either domain model or ORM model).
+
+        Args:
+            *objs: One or more model instances to be inserted.
+
+        Raises:
+            TypeError: If an object's type is not registered in any table.
+
+        Example:
+            >>> from functools import partial
+            >>> from jqr.database.db import DB
+            >>> from jqr.database.orm.example import FooORM, Foo
+            >>> from jqr.database.table import Table
+            >>>
+            >>> db = DB(tables_map={"foo": partial(Table, model_class=FooORM)})
+            >>>
+            >>> # Insert multiple objects (mix of domain and ORM models)
+            >>> db.insert(Foo(id=1, name="apple"), FooORM(id=2, name="banana"))
+            >>> len(db.foo.select())
+            2
         """
         for obj in objs:
             table = self._model_to_table.get(type(obj))
@@ -50,7 +97,15 @@ class DB:
             table.insert(obj)
 
     def _initialize_tables(self, tables_map: dict[str, type]):
-        """Initialize table interfaces as attributes of this database instance."""
+        """Initialize table interfaces as attributes of this database instance.
+
+        This is an internal method called during `__init__`. It instantiates
+        each table class and maps both domain and ORM models to the table
+        instance for routing in `insert()`.
+
+        Args:
+            tables_map: Mapping of attribute names to table classes.
+        """
         for attr, table_cls in tables_map.items():
             table = table_cls(self.connection, read_only=self.read_only)
             setattr(self, attr, table)
@@ -60,25 +115,54 @@ class DB:
             if hasattr(table.model_class, "_domain_model") and table.model_class._domain_model:
                 self._model_to_table[table.model_class._domain_model] = table
 
+    @property
+    def table(self) -> dict[type, Any]:
+        """Return a mapping of model classes to table instances.
+
+        This allows looking up a table interface by its associated model class
+        (either the domain model or the ORM model).
+
+        Returns:
+            dict[type, Any]: Mapping of model classes to Table instances.
+
+        Example:
+            >>> from functools import partial
+            >>> from jqr.database.db import DB
+            >>> from jqr.database.orm.example import FooORM, Foo
+            >>> from jqr.database.table import Table
+            >>>
+            >>> db = DB(tables_map={"foo": partial(Table, model_class=FooORM)})
+            >>> db.table[Foo] == db.foo
+            True
+            >>> db.table[FooORM] == db.foo
+            True
+        """
+        return self._model_to_table
+
     def execute_query(self, query: str, params: Sequence | None = None):
         """Execute a SQL query against the underlying connection.
 
-        Parameters
-        ----------
-        query:
-            SQL query string with optional placeholders.
-        params:
-            Positional parameters for the query, if any.
+        Args:
+            query: SQL query string with optional placeholders (`?`).
+            params: Positional parameters for the query, if any.
 
         Returns:
-        -------
-        duckdb.DuckDBPyConnection
-            The DuckDB cursor-like object after execution.
+            duckdb.DuckDBPyConnection: The DuckDB connection object after execution.
+
+        Example:
+            >>> from jqr.database.db import DB
+            >>> db = DB(tables_map={})
+            >>> res = db.execute_query("SELECT 1 as val")
+            >>> res.fetchone()
+            (1,)
         """
         return self.connection.execute(query, params)
 
     def close(self) -> None:
-        """Close the underlying database connection."""
+        """Close the underlying database connection.
+
+        Once closed, no further queries can be executed.
+        """
         self.connection.close()
 
     def cursor(self):
@@ -90,15 +174,39 @@ class DB:
         return self.connection.commit()
 
     def drop_all_tables(self) -> None:
-        """Drop all tables in the database (idempotent)."""
+        """Drop all tables in the database (idempotent).
+
+        Example:
+            >>> from functools import partial
+            >>> from jqr.database.db import DB
+            >>> from jqr.database.orm.example import FooORM
+            >>> from jqr.database.table import Table
+            >>>
+            >>> db = DB(tables_map={"foo": partial(Table, model_class=FooORM)})
+            >>> db.drop_all_tables()
+            >>> # No tables left
+            >>> db.execute_query("SHOW TABLES").fetchall()
+            []
+        """
         tables = self.connection.execute("SHOW TABLES").fetchall()
         for (table_name,) in tables:
             self.connection.execute(f"DROP TABLE IF EXISTS {table_name}")
 
     def __enter__(self):
-        """Enter the runtime context for the DB object."""
+        """Enter the runtime context for the DB object.
+
+        Returns:
+            DB: The database instance itself.
+
+        Example:
+            >>> from jqr.database.db import DB
+            >>> with DB(tables_map={}) as db:
+            ...     res = db.execute_query("SELECT 42")
+            ...     res.fetchone()
+            (42,)
+        """
         return self
 
     def __exit__(self, exc_type, exc_value, traceback):
-        """Exit the runtime context for the DB object."""
+        """Exit the runtime context for the DB object, closing the connection."""
         self.close()

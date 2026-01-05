@@ -12,27 +12,26 @@ Key Benefits:
 
 Usage Patterns:
     1. **Context Manager (Recommended):**
-        >>> from jqr.orm import Database, use_db
-        >>> from jqr.orm.models import Contract
-        >>> from datetime import date
-        >>> db = Database()
-        >>> contract = Contract(contract_id=1, ticker="ESH25", expiry=date(2025, 3, 20))
+        >>> from functools import partial
+        >>> from jqr.database.context import use_db, set_default_db, get_default_db
+        >>> from jqr.database.db import DB
+        >>> from jqr.database.orm.example import FooORM
+        >>> from jqr.database.table import Table
+        >>>
+        >>> # Create database
+        >>> db = DB(tables_map={"foo": partial(Table, model_class=FooORM)})
+        >>>
+        >>> # Use context manager to set default database
         >>> with use_db(db):
-        ...     # Methods can omit db parameter
-        ...     pass # future = contract.get_future()  # uses context default
+        ...     retrieved_db = get_default_db()
+        ...     retrieved_db is db
+        True
 
     2. **Global Setting:**
-        >>> from jqr.database.context import set_default_db
-        >>> db = Database()
-        >>> set_default_db(db)
-        >>> # Now all methods use this db by default
+        Use `set_default_db(db)` to set a global default database.
 
     3. **Explicit (Always Works):**
-        >>> from jqr.orm.models import Contract
-        >>> from datetime import date
-        >>> db = Database()
-        >>> contract = Contract(contract_id=1, ticker="ESH25", expiry=date(2025, 3, 20))
-        >>> # future = contract.get_future(db=db)  # explicit parameter
+        Pass `db=db` parameter explicitly to methods that accept it.
 
 Design Notes:
     - The context is stored using Python's contextvars module, which provides
@@ -42,32 +41,8 @@ Design Notes:
     - The use_db() context manager properly restores the previous value on exit
     - Type hints use `object` to avoid circular imports; runtime checks can use
       the actual Database type if needed
-    - Public APIs should still accept `db: Database | None = None` and do:
+    - Public APIs should still accept `db: DB | None = None` and do:
       `db = db or get_default_db()`
-
-Examples:
-    >>> from jqr.orm import Database, use_db
-    >>> from jqr.orm.models import Publisher, Future, Contract
-    >>> from datetime import date
-    >>>
-    >>> # Setup
-    >>> db = Database()
-    >>> publisher = Publisher(publisher_id=1, name="CME", dataset="GLBX.MDP3", venue="GLBX")
-    >>> db.publisher.insert(publisher)
-    >>>
-    >>> future = Future(future_id=100, name="E-mini S&P 500", ticker="ES", publisher_id=1)
-    >>> db.futures.insert(future)
-    >>>
-    >>> contract = Contract(contract_id=1001, future_id=100, ticker="ESH25",
-    ...                     expiry=date(2025, 3, 20))
-    >>> db.contracts.insert(contract)
-    >>>
-    >>> # Use context to avoid passing db everywhere
-    >>> with use_db(db):
-    ...     # Get related entities without explicit db parameter
-    ...     publisher_obj = future.get_publisher()  # uses context db
-    ...     contracts = future.get_contracts()  # uses context db
-    ...     parent_future = contract.get_future()  # uses context db
 """
 
 from __future__ import annotations
@@ -122,7 +97,7 @@ def get_default_db() -> DB | object:
     if db is None:
         raise RuntimeError(
             "No default Database set for this context. "
-            "Pass a Database explicitly or use `jqr.orm.context.use_db(db)` / set_default_db(db)."
+            "Pass a Database explicitly or use `jqr.database.context.use_db(db)` / set_default_db(db)."
         )
     return db
 

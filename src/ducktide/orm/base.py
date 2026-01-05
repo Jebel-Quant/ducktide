@@ -7,29 +7,70 @@ for interacting with databases using a DB-API 2.0 compatible interface
 API Design
 ----------
 This ORM follows the **Repository/Table Pattern** where all database operations
-are performed through table interfaces provided by the Database class:
+are performed through table interfaces provided by the Database class.
 
-    from jqr.orm import Database, Publisher
+Key Features:
+    - Schema-driven table creation
+    - Automatic column inference from schema
+    - Type-safe row-to-object conversion
+    - SQL generation for table initialization
+    - Separation of domain models and persistence logic
 
-    db = Database()
+Example:
+    >>> from functools import partial
+    >>> from jqr.database.db import DB
+    >>> from jqr.database.orm.example import FooORM, Foo
+    >>> from jqr.database.table import Table
+    >>>
+    >>> # Create database and insert data
+    >>> db = DB(tables_map={"foo": partial(Table, model_class=FooORM)})
+    >>> foo = Foo(id=1, name="widget")
+    >>> db.insert(foo)
+    >>>
+    >>> # Query the data
+    >>> table = db.table[FooORM]
+    >>> results = table.select()
+    >>> results[0].name
+    'widget'
+    >>>
+    >>> # Generate SQL for schema inspection
+    >>> sql = FooORM.generate_create_table_sql()
+    >>> "CREATE TABLE" in sql
+    True
 
-    # Create model instances
-    publisher = Publisher(publisher_id=1, name="CME", dataset="GLBX.MDP3", venue="GLBX")
-
-    # Perform operations via table interface
-    db.publisher.insert(publisher)         # Insert
-    all_pubs = db.publisher.select()        # Query all
-    filtered = db.publisher.select("venue = ?", ["GLBX"])  # Query with filter
-
-Models are immutable Pydantic dataclasses that represent domain entities.
-They do NOT have save(), find(), or delete() methods. All persistence
-operations go through the Database table interfaces.
+Design Philosophy:
+    Models are immutable Pydantic dataclasses that represent domain entities.
+    They do NOT have save(), find(), or delete() methods. All persistence
+    operations go through the Database table interfaces, maintaining a clean
+    separation between domain logic and data access.
 """
 
 from __future__ import annotations
 
 from abc import ABC
 from typing import Any, ClassVar, Self
+
+from pydantic import BaseModel, ConfigDict
+
+
+class DomainModel(BaseModel):
+    """Base class for domain models.
+
+    This class provides a common base for all domain models in JQR,
+    ensuring consistent configuration and automatic table name inference.
+    """
+
+    model_config = ConfigDict(frozen=True, str_strip_whitespace=True)
+
+    @property
+    def table_name(self) -> str:
+        """Return the canonical storage table name for this model."""
+        name = self.__class__.__name__.lower()
+        if name.endswith("orm"):
+            name = name[:-3]
+        if name.endswith("model"):
+            name = name[:-5]
+        return name
 
 
 class ORMModel(ABC):
@@ -45,19 +86,23 @@ class ORMModel(ABC):
     design decision to maintain a clear separation between domain models and
     persistence logic, following the Repository pattern.
 
-    Usage Example:
-        from jqr.orm import Database, Publisher
-
-        db = Database()
-        publisher = Publisher(publisher_id=1, dataset="GLBX.MDP3", venue="GLBX")
-
-        # ✓ Correct: Use table interface
-        db.publisher.insert(publisher)
-        all_publishers = db.publisher.select()
-
-        # ✗ Incorrect: Models don't have these methods
-        # publisher.save()  # This will NOT work
-        # Publisher.find()  # This will NOT work
+    Example:
+        >>> from functools import partial
+        >>> from jqr.database import DB
+        >>> from jqr.database.orm.example import FooORM
+        >>> from jqr.database.table import Table
+        >>>
+        >>> # FooORM is a concrete implementation of ORMModel
+        >>> db = DB(tables_map={"foo": partial(Table, model_class=FooORM)})
+        >>> foo1 = FooORM(id=1, name="alpha")
+        >>> foo2 = FooORM(id=2, name="beta")
+        >>> db.insert(foo1, foo2)
+        >>>
+        >>> # Access via table interface
+        >>> for foo in db.table[FooORM]:
+        ...     print(foo.id)
+        1
+        2
 
     Attributes:
         _table_name: Name of the database table (must be set by subclasses).
@@ -74,8 +119,47 @@ class ORMModel(ABC):
     _domain_model: ClassVar[type | None] = None  # domain model class
 
     def __init_subclass__(cls, **kwargs):
-        """Initialize subclass and automatically set _columns if not provided."""
+        """Initialize subclass and automatically set _columns if not provided.
+
+        This hook is called when a new subclass of ORMModel is created. It
+        automatically infers the _columns list from the _schema dictionary,
+        filtering out non-column entries like FOREIGN KEY constraints.
+
+        Example:
+            >>> from jqr.database.orm.base import ORMModel
+            >>>
+            >>> # Define a model with _schema but no _columns
+            >>> class BarORM(ORMModel):
+            ...     _table_name = "bar"
+            ...     _schema = {
+            ...         "id": "INTEGER PRIMARY KEY",
+            ...         "value": "REAL",
+            ...         "FOREIGN KEY (id)": "REFERENCES foo(id)"
+            ...     }
+            ...     def __init__(self, id, value):
+            ...         self.id = id
+            ...         self.value = value
+            >>>
+            >>> # _columns is automatically set, excluding FOREIGN KEY
+            >>> BarORM._columns
+            ['id', 'value']
+
+        Note:
+            This is an internal method called automatically during class
+            definition. Users don't need to call it directly.
+        """
         super().__init_subclass__(**kwargs)
+
+        # Automatically determine _table_name if not explicitly defined or is empty
+        if not cls._table_name:
+            name = cls.__name__.lower()
+            if name.endswith("orm"):
+                name = name[:-3]
+            if name.endswith("ormmodel"):
+                name = name[:-8]
+            elif name.endswith("model"):
+                name = name[:-5]
+            cls._table_name = name
 
         # Automatically determine _columns from _schema keys if not explicitly defined
         if not hasattr(cls, "_columns") or cls._columns is getattr(ORMModel, "_columns", None):
@@ -94,16 +178,13 @@ class ORMModel(ABC):
         Returns:
             str: A SQL CREATE TABLE IF NOT EXISTS statement.
 
-        Examples:
-            >>> from jqr.orm.models.publisher import PublisherORM
-            >>> sql = PublisherORM.generate_create_table_sql()
-            >>> print(sql)
-            CREATE TABLE IF NOT EXISTS publisher (
-                publisher_id INTEGER PRIMARY KEY,
-                name TEXT NOT NULL,
-                dataset TEXT NOT NULL,
-                venue TEXT NOT NULL,
-                description TEXT
+        Example:
+            >>> from jqr.database.orm.example import FooORM
+            >>> sql = FooORM.generate_create_table_sql()
+            >>> print(sql)  # doctest: +NORMALIZE_WHITESPACE
+            CREATE TABLE IF NOT EXISTS foo (
+                id INTEGER PRIMARY KEY,
+                name TEXT NOT NULL
             );
 
         Note:
@@ -135,12 +216,21 @@ class ORMModel(ABC):
             Self: A new instance of the model class populated with values
                 from the database row.
 
-        Examples:
-            >>> from jqr.orm.models.publisher import PublisherORM
-            >>> row = (1, "CME", "GLBX.MDP3", "GLBX", "CME Group")
-            >>> publisher = PublisherORM.from_row(row)
-            >>> publisher.name
-            'CME'
+        Example:
+            >>> from typing import ClassVar
+            >>> from pydantic import BaseModel
+            >>> class ModelClass(ORMModel, BaseModel):
+            ...     id: int
+            ...     name: str
+            ...     _primary_key: ClassVar[str] = "id"
+            ...     _schema: ClassVar[dict[str, str]] = {"id": "int", "name": "str"}
+            >>> # Simulate a database row result
+            >>> row = (42, "test_name")
+            >>> foo = ModelClass.from_row(row)
+            >>> foo.id
+            42
+            >>> foo.name
+            'test_name'
 
         Note:
             This is an internal method typically called by Table.select().
