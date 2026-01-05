@@ -175,6 +175,15 @@ class Table:
         rows = self.connection.execute(sql, where_params).fetchall()
         return [self.model_class.from_row(row) for row in rows]
 
+    def get_by(self, key, value):
+        """Return a single row from the table by a given key."""
+        result = self.select(f"{key} = ?", [value])
+
+        if result is None or len(result) == 0:
+            raise KeyError(f"No row found for {key} = {value}")
+
+        return result[0]
+
     def get(self, id=None):
         """Return a single row from the table as a model instance."""
         if id is None:

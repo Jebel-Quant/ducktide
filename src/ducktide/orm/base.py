@@ -31,36 +31,6 @@ from __future__ import annotations
 from abc import ABC
 from typing import Any, ClassVar, Self
 
-from pydantic import BaseModel, ConfigDict
-
-
-class DomainModel(BaseModel):
-    """Base class for domain models.
-
-    Provides a generic `from_row` method for creating instances from database rows.
-    """
-
-    model_config = ConfigDict(frozen=True, str_strip_whitespace=True)
-
-    @classmethod
-    def from_row(cls, row: tuple[Any, ...]) -> Self:
-        """Create a model instance from a database row.
-
-        Args:
-            row: Tuple of values from a database query.
-
-        Returns:
-            A new instance of the model.
-        """
-        # If we have _columns (from ORMModel mixin), use them.
-        # Otherwise, fall back to pydantic model_fields.
-        if hasattr(cls, "_columns"):
-            columns = cls._columns
-        else:
-            columns = list(cls.model_fields.keys())
-
-        return cls(**dict(zip(columns, row)))
-
 
 class ORMModel(ABC):
     """Base class for ORM models with schema definitions.
@@ -127,7 +97,7 @@ class ORMModel(ABC):
         return f"CREATE TABLE IF NOT EXISTS {table_name} (\n    {field_definitions_str}\n);"
 
     @classmethod
-    def _from_row(cls, row: tuple[Any, ...]) -> Self:
+    def from_row(cls, row: tuple[Any, ...]) -> Self:
         """Create a model instance from a database row.
 
         Args:
@@ -136,7 +106,11 @@ class ORMModel(ABC):
         Returns:
             A new instance of the model.
         """
-        if hasattr(cls, "from_row"):
-            return cls.from_row(row)
+        # If we have _columns (from ORMModel mixin), use them.
+        # Otherwise, fall back to pydantic model_fields.
+        # if hasattr(cls, "_columns"):
+        columns = cls._columns
+        # else:
+        # columns = list(cls.model_fields.keys())
 
-        return cls(**dict(zip(cls._columns, row)))
+        return cls(**dict(zip(columns, row)))
