@@ -58,14 +58,16 @@ class TimeSeriesDB:
         df = future.get_timeseries_frame(ts_db)
     """
 
-    def __init__(self, path: str | Path | None = None):
+    def __init__(self, path: str | Path | None = None, time_col="timestamp"):
         """Initialize a DuckDB-backed time series database.
 
         Args:
             path: Optional filesystem path to a DuckDB database file. If None,
                 an in-memory database is created (":memory:").
+            time_col: Name of the column containing time information (default: "timestamp").
         """
         self.con = duckdb.connect(path or ":memory:")
+        self.time_col = time_col
 
     # ------------------
     # Utility operations
@@ -128,7 +130,7 @@ class TimeSeriesDB:
 
         try:
             query, params = self._build_query(table, instrument_id, start, end)
-            return self.con.execute(query, params).pl().sort("timestamp")
+            return self.con.execute(query, params).pl().sort(self.time_col)
         except Exception:
             # Graceful error handling: on any error (SQL, invalid params, or
             # internal build errors), return an empty DataFrame.
@@ -149,11 +151,11 @@ class TimeSeriesDB:
             params.append(instrument_id)
 
         if start is not None:
-            conditions.append("timestamp >= ?")
+            conditions.append(f"{self.time_col} >= ?")
             params.append(start)
 
         if end is not None:
-            conditions.append("timestamp <= ?")
+            conditions.append(f"{self.time_col} <= ?")
             params.append(end)
 
         where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
@@ -161,7 +163,7 @@ class TimeSeriesDB:
         # and produce simpler SQL strings (e.g., FROM schema.table).
         table_ref = table
 
-        query = f"SELECT * FROM {table_ref} {where} ORDER BY timestamp ASC"
+        query = f"SELECT * FROM {table_ref} {where} ORDER BY {self.time_col} ASC"
         return query, params
 
     def _quote_identifier(self, ident: str) -> str:
@@ -213,15 +215,17 @@ class TimeSeriesDB:
                 SELECT * FROM temp_ingest t
                 WHERE NOT EXISTS (
                 SELECT 1 FROM {quoted_table} x
-                WHERE x.instrument_id = t.instrument_id AND x.timestamp >= t.timestamp
+                WHERE x.instrument_id = t.instrument_id AND x.{self.time_col} >= t.{self.time_col}
                 )
             """
             self.con.execute(insert_sql)
             self.con.unregister("temp_ingest")
         else:
             # No instrument_id: global max timestamp
-            max_ts = self.con.execute(f"SELECT COALESCE(MAX(timestamp),'1970-01-01') FROM {quoted_table}").fetchone()[0]
-            new = frame.filter(pl.col("timestamp") > max_ts)
+            max_ts = self.con.execute(
+                f"SELECT COALESCE(MAX({self.time_col}),'1970-01-01') FROM {quoted_table}"
+            ).fetchone()[0]
+            new = frame.filter(pl.col(f"{self.time_col}") > max_ts)
             if new.height:
                 self._append(table, new)
 

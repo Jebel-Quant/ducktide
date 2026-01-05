@@ -28,8 +28,38 @@ operations go through the Database table interfaces.
 
 from __future__ import annotations
 
-from abc import ABC, abstractmethod
-from typing import Any, ClassVar
+from abc import ABC
+from typing import Any, ClassVar, Self
+
+from pydantic import BaseModel, ConfigDict
+
+
+class DomainModel(BaseModel):
+    """Base class for domain models.
+
+    Provides a generic `from_row` method for creating instances from database rows.
+    """
+
+    model_config = ConfigDict(frozen=True, str_strip_whitespace=True)
+
+    @classmethod
+    def from_row(cls, row: tuple[Any, ...]) -> Self:
+        """Create a model instance from a database row.
+
+        Args:
+            row: Tuple of values from a database query.
+
+        Returns:
+            A new instance of the model.
+        """
+        # If we have _columns (from ORMModel mixin), use them.
+        # Otherwise, fall back to pydantic model_fields.
+        if hasattr(cls, "_columns"):
+            columns = cls._columns
+        else:
+            columns = list(cls.model_fields.keys())
+
+        return cls(**dict(zip(columns, row)))
 
 
 class ORMModel(ABC):
@@ -73,6 +103,16 @@ class ORMModel(ABC):
     _columns: ClassVar[list[str]]  # column order in the database
     _domain_model: ClassVar[type | None] = None  # domain model class
 
+    def __init_subclass__(cls, **kwargs):
+        """Initialize subclass and automatically set _columns if not provided."""
+        super().__init_subclass__(**kwargs)
+
+        # Automatically determine _columns from _schema keys if not explicitly defined
+        if not hasattr(cls, "_columns") or cls._columns is getattr(ORMModel, "_columns", None):
+            if hasattr(cls, "_schema"):
+                # Filter out entries that are not columns (e.g., FOREIGN KEY constraints)
+                cls._columns = [k for k in cls._schema.keys() if " " not in k and "(" not in k]
+
     @classmethod
     def generate_create_table_sql(cls):
         """Generate a CREATE TABLE SQL statement from the model's fields."""
@@ -86,18 +126,8 @@ class ORMModel(ABC):
         field_definitions_str = ",\n    ".join(field_definitions)
         return f"CREATE TABLE IF NOT EXISTS {table_name} (\n    {field_definitions_str}\n);"
 
-    @abstractmethod
-    def _to_dict(self) -> dict[str, Any]:
-        """Convert the model instance to a dictionary.
-
-        Returns:
-            Dictionary mapping field names to values.
-        """
-        ...
-
     @classmethod
-    @abstractmethod
-    def _from_row(cls, row: tuple[Any, ...]) -> ORMModel:
+    def _from_row(cls, row: tuple[Any, ...]) -> Self:
         """Create a model instance from a database row.
 
         Args:
@@ -106,17 +136,7 @@ class ORMModel(ABC):
         Returns:
             A new instance of the model.
         """
-        ...
+        if hasattr(cls, "from_row"):
+            return cls.from_row(row)
 
-    @classmethod
-    @abstractmethod
-    def _from_dict(cls, data: dict[str, Any]) -> ORMModel:
-        """Create a model instance from a dictionary.
-
-        Args:
-            data: Dictionary mapping field names to values.
-
-        Returns:
-            A new instance of the model.
-        """
-        ...
+        return cls(**dict(zip(cls._columns, row)))
