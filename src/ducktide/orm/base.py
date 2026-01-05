@@ -85,7 +85,31 @@ class ORMModel(ABC):
 
     @classmethod
     def generate_create_table_sql(cls):
-        """Generate a CREATE TABLE SQL statement from the model's fields."""
+        """Generate a CREATE TABLE SQL statement from the model's schema definition.
+
+        This method constructs a SQL CREATE TABLE statement using the model's
+        _schema and _table_name class variables. It's used internally during
+        database initialization to set up tables.
+
+        Returns:
+            str: A SQL CREATE TABLE IF NOT EXISTS statement.
+
+        Examples:
+            >>> from jqr.orm.models.publisher import PublisherORM
+            >>> sql = PublisherORM.generate_create_table_sql()
+            >>> print(sql)
+            CREATE TABLE IF NOT EXISTS publisher (
+                publisher_id INTEGER PRIMARY KEY,
+                name TEXT NOT NULL,
+                dataset TEXT NOT NULL,
+                venue TEXT NOT NULL,
+                description TEXT
+            );
+
+        Note:
+            This is an internal method typically called by the Database class
+            during initialization. Users don't need to call it directly.
+        """
         table_name = cls._table_name
         fields = cls._schema
 
@@ -98,13 +122,29 @@ class ORMModel(ABC):
 
     @classmethod
     def from_row(cls, row: tuple[Any, ...]) -> Self:
-        """Create a model instance from a database row.
+        """Create a model instance from a database row tuple.
+
+        This method is used internally by the Table class to convert raw
+        database query results into model instances.
 
         Args:
-            row: Tuple of values from a database query.
+            row: Tuple of values from a database query, in the same order
+                as the model's _columns definition.
 
         Returns:
-            A new instance of the model.
+            Self: A new instance of the model class populated with values
+                from the database row.
+
+        Examples:
+            >>> from jqr.orm.models.publisher import PublisherORM
+            >>> row = (1, "CME", "GLBX.MDP3", "GLBX", "CME Group")
+            >>> publisher = PublisherORM.from_row(row)
+            >>> publisher.name
+            'CME'
+
+        Note:
+            This is an internal method typically called by Table.select().
+            Users don't need to call it directly - use the Table interface instead.
         """
         # If we have _columns (from ORMModel mixin), use them.
         # Otherwise, fall back to pydantic model_fields.

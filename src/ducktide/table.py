@@ -92,10 +92,33 @@ class Table:
     # Insert / Bulk Insert
     # ---------------------------
     def insert(self, *objs) -> None:
-        """Insert one or more objects.
+        """Insert one or more model instances into the table.
+
+        This is the primary method for adding data to the database. For a single
+        object, it performs a simple INSERT. For multiple objects, it delegates
+        to bulk_insert() for better performance.
 
         Args:
-            objs: One or more model instances.
+            *objs: One or more model instances (Publisher, Future, or Contract).
+                Can be either domain models or their ORM equivalents.
+
+        Examples:
+            >>> from jqr.orm import Database
+            >>> from jqr.orm.models import Publisher
+            >>> db = Database()
+            >>>
+            >>> # Insert a single publisher
+            >>> publisher = Publisher(publisher_id=1, name="CME", dataset="GLBX.MDP3", venue="GLBX")
+            >>> db.publisher.insert(publisher)
+            >>>
+            >>> # Insert multiple publishers at once
+            >>> pub1 = Publisher(publisher_id=2, name="ICE", dataset="ICE.DATA", venue="ICE")
+            >>> pub2 = Publisher(publisher_id=3, name="CBOE", dataset="CBOE.DATA", venue="CBOE")
+            >>> db.publisher.insert(pub1, pub2)
+
+        Note:
+            When inserting multiple objects, consider using bulk_insert() directly
+            for optimal performance with large datasets.
         """
         if not objs:
             return
@@ -114,13 +137,40 @@ class Table:
             self.bulk_insert(objs)
 
     def bulk_insert(self, objs: Iterable) -> None:
-        """Insert multiple objects into the table in one operation.
+        """Insert multiple objects into the table in one efficient operation.
+
+        This method is optimized for inserting many records at once, using
+        DuckDB's executemany() for batch processing. It's significantly faster
+        than calling insert() in a loop for large datasets.
 
         Parameters
         ----------
         objs:
             An iterable of model instances whose attributes map to the
             table's column order defined in ``self.columns``.
+
+        Examples:
+            >>> from jqr.orm import Database
+            >>> from jqr.orm.models import Future
+            >>> db = Database()
+            >>>
+            >>> # Create a list of futures to insert
+            >>> futures = [
+            ...     Future(future_id=i, name=f"Future {i}", ticker=f"F{i}", publisher_id=1)
+            ...     for i in range(2, 1002)
+            ... ]
+            >>>
+            >>> # Ensure publisher exists for foreign key constraint
+            >>> from jqr.orm.models import Publisher
+            >>> db.publisher.insert(Publisher(publisher_id=1, name="CME", dataset="GLBX.MDP3", venue="GLBX"))
+            >>>
+            >>> # Bulk insert all 1000 futures efficiently
+            >>> db.futures.bulk_insert(futures)
+
+        Performance:
+            For inserting 1000+ records, bulk_insert() can be 10-100x faster
+            than individual insert() calls due to reduced SQL parsing and
+            transaction overhead.
         """
         objs = list(objs)
         if not objs:
@@ -149,19 +199,59 @@ class Table:
     ):
         """Select rows from the table and return model instances.
 
+        Query the table with optional filtering via SQL WHERE clauses. Always
+        uses parameterized queries to prevent SQL injection.
+
         Parameters
         ----------
         where_clause:
-            Optional SQL WHERE clause (without ``WHERE``). If omitted,
-            all rows are returned.
+            Optional SQL WHERE clause (without the ``WHERE`` keyword). Use ``?``
+            as placeholders for parameters. If omitted, all rows are returned.
         where_params:
-            Optional parameter values for the WHERE clause.
+            Optional parameter values for the WHERE clause placeholders. Must
+            match the number of ``?`` in where_clause.
 
         Returns:
         -------
         list[model_class]
             A list of instantiated domain/ORM model objects created via
             ``model_class.from_row``.
+
+        Examples:
+        --------
+        >>> from jqr.orm import Database
+        >>> from jqr.orm.models import Publisher, Future
+        >>> from datetime import date
+        >>> db = Database()
+        >>>
+        >>> # Select all publishers
+        >>> all_publishers = db.publisher.select()
+        >>>
+        >>> # Select publishers by venue
+        >>> cme_publishers = db.publisher.select("venue = ?", ["GLBX"])
+        >>>
+        >>> # Select with multiple conditions
+        >>> active_futures = db.futures.select(
+        ...     "asset_class = ? AND currency = ?",
+        ...     ["Equity Index", "USD"]
+        ... )
+        >>>
+        >>> # Select contracts by date range
+        >>> march_contracts = db.contracts.select(
+        ...     "expiry >= ? AND expiry < ?",
+        ...     [date(2025, 3, 1), date(2025, 4, 1)]
+        ... )
+        >>>
+        >>> # Select with ORDER BY
+        >>> sorted_contracts = db.contracts.select(
+        ...     "future_id = ? ORDER BY expiry ASC",
+        ...     [100]
+        ... )
+
+        Note:
+        ----
+        Always use parameterized queries (``?`` placeholders) rather than string
+        concatenation to prevent SQL injection vulnerabilities.
         """
         where_clause = where_clause or "1 = 1"
         where_params = where_params or []

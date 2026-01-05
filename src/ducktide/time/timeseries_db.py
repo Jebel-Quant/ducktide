@@ -113,17 +113,49 @@ class TimeSeriesDB:
         start: date | None = None,
         end: date | None = None,
     ) -> pl.DataFrame:
-        """Return a time-ordered Polars DataFrame from a table.
+        """Return a time-ordered Polars DataFrame from a time series table.
+
+        Retrieves time series data with optional filtering by instrument ID and
+        time range. The result is always sorted by timestamp in ascending order.
 
         Args:
             table: Name of the table to read. May be schema-qualified as "schema.table".
-            instrument_id: Optional filter to return rows for a specific instrument.
-            start: Optional inclusive lower bound for the ``timestamp`` column.
-            end: Optional inclusive upper bound for the ``timestamp`` column.
+            instrument_id: Optional filter to return rows for a specific instrument
+                (e.g., future_id or contract_id).
+            start: Optional inclusive lower bound for the timestamp column.
+                All rows with timestamp >= start will be included.
+            end: Optional inclusive upper bound for the timestamp column.
+                All rows with timestamp <= end will be included.
 
         Returns:
-            A Polars DataFrame sorted by ``timestamp`` ascending. If the table
-            does not exist, an empty DataFrame is returned.
+            pl.DataFrame: A Polars DataFrame sorted by timestamp in ascending order.
+                If the table does not exist or an error occurs, an empty DataFrame
+                is returned.
+
+        Examples:
+            >>> from jqr.database.time import TimeSeriesDB
+            >>> from datetime import date
+            >>>
+            >>> ts_db = TimeSeriesDB()
+            >>>
+            >>> # Get all data for a specific instrument
+            >>> df = ts_db.get_timeseries_frame("future", instrument_id=100)
+            >>>
+            >>> # Get data within a date range
+            >>> df = ts_db.get_timeseries_frame(
+            ...     "future",
+            ...     instrument_id=100,
+            ...     start=date(2025, 1, 1),
+            ...     end=date(2025, 12, 31)
+            ... )
+            >>>
+            >>> # Get all data from a table
+            >>> df = ts_db.get_timeseries_frame("contract")
+
+        Note:
+            This method gracefully handles errors by returning an empty DataFrame
+            rather than raising exceptions. This is intentional to support robust
+            data pipelines that can continue even when data is missing.
         """
         if table not in self.tables():
             return pl.DataFrame()
@@ -184,10 +216,52 @@ class TimeSeriesDB:
         return ident.replace('"', "")
 
     def ingest(self, table: str, frame: pl.DataFrame) -> None:
-        """Ingest data from a Polars DataFrame into `table`.
+        """Ingest time series data from a Polars DataFrame into a table.
 
-        Creates the table when missing. When appending, only new rows are
-        inserted (timestamp strictly greater than existing max timestamp).
+        Automatically creates the table if it doesn't exist, using the schema
+        inferred from the DataFrame. When appending to an existing table, only
+        new rows (timestamp strictly greater than existing max timestamp) are
+        inserted to avoid duplicates.
+
+        Args:
+            table: Name of the destination table. May be schema-qualified as
+                "schema.table". If a schema is specified and doesn't exist, it
+                will be created automatically.
+            frame: Polars DataFrame containing the data to ingest. Must include
+                a timestamp column (default name: "timestamp"). The DataFrame
+                schema will be used to create the table if it doesn't exist.
+
+        Examples:
+            >>> import polars as pl
+            >>> from jqr.database.time import TimeSeriesDB
+            >>> from datetime import datetime
+            >>>
+            >>> ts_db = TimeSeriesDB()
+            >>>
+            >>> # Create sample OHLCV data
+            >>> df = pl.DataFrame({
+            ...     'timestamp': [datetime(2025, 1, 1, 9, 0)],
+            ...     'instrument_id': [100],
+            ...     'open': [100.0],
+            ...     'high': [105.0],
+            ...     'low': [99.0],
+            ...     'close': [103.0],
+            ...     'volume': [1000]
+            ... })
+            >>>
+            >>> # Ingest into 'future' table
+            >>> ts_db.ingest("future", df)
+            >>>
+            >>> # Ingest into schema-qualified table
+            >>> ts_db.ingest("market_data.futures", df)
+
+        Note:
+            - The function uses the timestamp column specified during TimeSeriesDB
+              initialization (default: "timestamp").
+            - When appending, only rows with timestamps strictly greater than the
+              current maximum are inserted, preventing duplicate data.
+            - Table creation is automatic and uses DuckDB's schema inference from
+              the Polars DataFrame.
         """
         # Ensure schema exists when provided
         if "." in table:
