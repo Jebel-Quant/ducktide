@@ -49,16 +49,20 @@ class TimeSeriesDB:
         # df = foo.get_timeseries_frame(ts_db)
     """
 
-    def __init__(self, path: str | Path | None = None, time_col="timestamp"):
+    def __init__(self, path: str | Path | None = None, time_col="timestamp", read_only: bool = False):
         """Initialize a DuckDB-backed time series database.
 
         Args:
             path: Optional filesystem path to a DuckDB database file. If None,
                 an in-memory database is created (":memory:").
             time_col: Name of the column containing time information (default: "timestamp").
+            read_only: If True, open the database in read-only mode. This prevents
+                all write operations and allows multiple processes to safely read from
+                the same file without locks.
         """
-        self.con = duckdb.connect(path or ":memory:")
+        self.con = duckdb.connect(path or ":memory:", read_only=read_only)
         self.time_col = time_col
+        self.read_only = read_only
 
     # ------------------
     # Utility operations
