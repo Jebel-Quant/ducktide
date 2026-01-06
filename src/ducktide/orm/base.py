@@ -62,15 +62,18 @@ class DomainModel(BaseModel):
 
     model_config = ConfigDict(frozen=True, str_strip_whitespace=True)
 
-    @property
-    def table_name(self) -> str:
-        """Return the canonical storage table name for this model."""
-        name = self.__class__.__name__.lower()
-        if name.endswith("orm"):
-            name = name[:-3]
-        if name.endswith("model"):
-            name = name[:-5]
-        return name
+    table_name: ClassVar[str] = ""
+
+    def __init_subclass__(cls, **kwargs):
+        """Automatically set table_name if not provided by the subclass."""
+        super().__init_subclass__(**kwargs)
+        if not cls.table_name:
+            name = cls.__name__.lower()
+            for suffix in ("ormmodel", "model", "orm"):
+                if name.endswith(suffix):
+                    name = name[: -len(suffix)]
+                    break
+            cls.table_name = name
 
 
 class ORMModel(ABC):
@@ -152,14 +155,7 @@ class ORMModel(ABC):
 
         # Automatically determine _table_name if not explicitly defined or is empty
         if not cls._table_name:
-            name = cls.__name__.lower()
-            if name.endswith("orm"):
-                name = name[:-3]
-            if name.endswith("ormmodel"):
-                name = name[:-8]
-            elif name.endswith("model"):
-                name = name[:-5]
-            cls._table_name = name
+            cls._table_name = getattr(cls, "table_name", cls.__name__.lower())
 
         # Automatically determine _columns from _schema keys if not explicitly defined
         if not hasattr(cls, "_columns") or cls._columns is getattr(ORMModel, "_columns", None):

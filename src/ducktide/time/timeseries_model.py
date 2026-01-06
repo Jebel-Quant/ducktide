@@ -9,26 +9,22 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from datetime import date
+from typing import TYPE_CHECKING
 
 import polars as pl
 
 from jqr.database.exceptions import ValidationError
 
-from .timeseries_repo import TimeSeriesRepository
+if TYPE_CHECKING:
+    from .timeseries_repo import TimeSeriesRepository
 
 
 class TimeSeriesModel(ABC):
     """Abstract base class for domain models exposing time series data.
 
     Subclasses must provide an `instrument_id` property and a `table_name`
-    property. The latter is often automatically provided if the model
-    inherits from `DomainModel`.
+    class attribute (inherited from DomainModel).
     """
-
-    @property
-    @abstractmethod
-    def table_name(self) -> str:
-        """The name of the table containing this model's time series data."""
 
     @property
     @abstractmethod
