@@ -25,6 +25,8 @@ class Foo(DomainModel, TimeSeriesModel):
         1
     """
 
+    table_name: ClassVar[str] = "foo"
+
     id: int = 1
     name: str = ""
 
@@ -52,6 +54,7 @@ class FooORM(ORMModel, Foo):
         'Mapped'
     """
 
+    _table_name: ClassVar[str] = Foo.table_name
     _domain_model: ClassVar[type] = Foo
     _primary_key: ClassVar[str] = "id"
     _schema: ClassVar[dict[str, str]] = {

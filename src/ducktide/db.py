@@ -21,15 +21,14 @@ class DB:
 
     Example:
         >>> from functools import partial
-        >>> from jqr.database.db import DB
+        >>> from jqr.database import DB, Table
         >>> from jqr.database.orm.example import FooORM, Foo
-        >>> from jqr.database.table import Table
         >>>
         >>> # Initialize with a mapping of attribute names to table classes
         >>> db = DB(tables_map={"foo": partial(Table, model_class=FooORM)})
         >>>
         >>> # Tables are accessible as attributes
-        >>> isinstance(db.foo, Table)
+        >>> isinstance(db.table[Foo], Table)
         True
         >>>
         >>> # Insert domain models directly

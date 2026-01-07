@@ -62,19 +62,6 @@ class DomainModel(BaseModel):
 
     model_config = ConfigDict(frozen=True, str_strip_whitespace=True)
 
-    table_name: ClassVar[str] = ""
-
-    def __init_subclass__(cls, **kwargs):
-        """Automatically set table_name if not provided by the subclass."""
-        super().__init_subclass__(**kwargs)
-        if not cls.table_name:
-            name = cls.__name__.lower()
-            for suffix in ("ormmodel", "model", "orm"):
-                if name.endswith(suffix):
-                    name = name[: -len(suffix)]
-                    break
-            cls.table_name = name
-
 
 class ORMModel(ABC):
     """Base class for ORM models with schema definitions.
@@ -155,7 +142,13 @@ class ORMModel(ABC):
 
         # Automatically determine _table_name if not explicitly defined or is empty
         if not cls._table_name:
-            cls._table_name = getattr(cls, "table_name", cls.__name__.lower())
+            # Infer from class name with suffix stripping
+            name = cls.__name__.lower()
+            for suffix in ("ormmodel", "model", "orm"):
+                if name.endswith(suffix):
+                    name = name[: -len(suffix)]
+                    break
+            cls._table_name = name
 
         # Automatically determine _columns from _schema keys if not explicitly defined
         if not hasattr(cls, "_columns") or cls._columns is getattr(ORMModel, "_columns", None):

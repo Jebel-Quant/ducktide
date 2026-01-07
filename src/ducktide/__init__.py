@@ -15,9 +15,8 @@ The database layer follows a two-database architecture:
 
 Example:
     >>> from functools import partial
-    >>> from jqr.database import DB
+    >>> from jqr.database import DB, Table
     >>> from jqr.database.orm.example import FooORM, Foo
-    >>> from jqr.database.table import Table
     >>>
     >>> # Create database with FooORM table
     >>> db = DB(tables_map={"foo": partial(Table, model_class=FooORM)})
@@ -25,7 +24,7 @@ Example:
     >>> db.insert(foo)
     >>>
     >>> # Query the data
-    >>> table = db.table[FooORM]
+    >>> table = db.table[Foo]
     >>> result = table.select()
     >>> len(result)
     1
@@ -38,7 +37,9 @@ Note:
     on top of this infrastructure.
 """
 
+from . import context, exceptions, orm
 from .db import DB
-from .time.timeseries_db import TimeSeriesDB
+from .table import Table
+from .time import TimeSeriesDB, TimeSeriesModel, TimeSeriesRepository
 
-__all__ = ["DB", "TimeSeriesDB"]
+__all__ = ["DB", "TimeSeriesDB", "TimeSeriesModel", "TimeSeriesRepository", "Table", "context", "exceptions", "orm"]

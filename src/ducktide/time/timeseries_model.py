@@ -54,8 +54,12 @@ class TimeSeriesModel(ABC):
             msg = "Cannot get timeseries: instrument_id is not set"
             raise ValidationError(msg)
 
+        table = getattr(type(self), "table_name", None)
+        if table is None:
+            raise AttributeError(f"{type(self).__name__} must define table_name")
+
         return repo.get_timeseries_frame(
-            table=self.table_name,
+            table=table,
             instrument_id=self.instrument_id,
             start=start,
             end=end,

@@ -17,6 +17,7 @@ Note:
     Repository pattern.
 """
 
+from . import example
 from .base import DomainModel, ORMModel
 
-__all__ = ["DomainModel", "ORMModel"]
+__all__ = ["DomainModel", "ORMModel", "example"]
