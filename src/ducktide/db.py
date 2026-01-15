@@ -7,6 +7,7 @@ executing raw queries, and supporting context manager patterns.
 from __future__ import annotations
 
 from collections.abc import Sequence
+from pathlib import Path
 from typing import Any
 
 import duckdb
@@ -37,7 +38,7 @@ class DB:
         1
     """
 
-    def __init__(self, tables_map: dict[str, type], db_path: str = ":memory:", read_only: bool = False):
+    def __init__(self, tables_map: dict[str, type], db_path: str | Path = ":memory:", read_only: bool = False):
         """Initialize the DB with either in-memory or persistent storage.
 
         Args:
