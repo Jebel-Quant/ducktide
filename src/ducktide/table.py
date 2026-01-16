@@ -4,13 +4,15 @@ This module provides the Table class, which serves as a repository-pattern
 interface for performing database operations on specific tables.
 """
 
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable, Iterator, Sequence
 from pathlib import Path
+from typing import Any
 
 import duckdb
 import polars as pl
 
 from .exceptions import DataError
+from .utils.path_validation import escape_path_for_sql, validate_file_path
 
 
 class Table:
@@ -77,7 +79,25 @@ class Table:
 
     # -----------------------------------------------------------------
 
-    def _values_from_obj(self, obj) -> tuple:
+    def _get_single_result(self, results: list[Any], identifier: str, value: Any) -> Any:
+        """Return a single result from a list, raising KeyError if not found.
+
+        Args:
+            results: List of query results.
+            identifier: Name of the identifier field (for error message).
+            value: Value of the identifier (for error message).
+
+        Returns:
+            The first (and expected only) result from the list.
+
+        Raises:
+            KeyError: If the results list is empty.
+        """
+        if not results:
+            raise KeyError(f"No row found for {identifier} = {value}")
+        return results[0]
+
+    def _values_from_obj(self, obj: Any) -> tuple:
         # Check if obj is an instance of model_class or its base domain class
         # This allows both domain models and ORM models to be inserted into a Table
         # We check if the object has all required columns as attributes.
@@ -189,8 +209,16 @@ class Table:
         values = [self._values_from_obj(obj) for obj in objs]
         self.connection.executemany(sql, values)
 
-    def execute(self, query: str, params: Sequence | None = None):
-        """Execute a SQL query against the underlying connection."""
+    def execute(self, query: str, params: Sequence | None = None) -> list[Any]:
+        """Execute a SQL query against the underlying connection.
+
+        Args:
+            query: SQL query string with optional placeholders.
+            params: Parameter values for the query placeholders.
+
+        Returns:
+            List of model instances created from the query results.
+        """
         rows = self.connection.execute(query, params).fetchall()
         return [self.model_class.from_row(row) for row in rows]
 
@@ -261,26 +289,39 @@ class Table:
         rows = self.connection.execute(sql, where_params).fetchall()
         return [self.model_class.from_row(row) for row in rows]
 
-    def get_by(self, key, value):
-        """Return a single row from the table by a given key."""
+    def get_by(self, key: str, value: Any) -> Any:
+        """Return a single row from the table by a given key.
+
+        Args:
+            key: The column name to filter by.
+            value: The value to match.
+
+        Returns:
+            The model instance matching the given key-value pair.
+
+        Raises:
+            KeyError: If no row is found for the given key-value pair.
+        """
         result = self.select(f"{key} = ?", [value])
+        return self._get_single_result(result, key, value)
 
-        if result is None or len(result) == 0:
-            raise KeyError(f"No row found for {key} = {value}")
+    def get(self, id: int | None = None) -> Any:
+        """Return a single row from the table as a model instance.
 
-        return result[0]
+        Args:
+            id: The primary key value to look up. If None, returns None.
 
-    def get(self, id=None):
-        """Return a single row from the table as a model instance."""
+        Returns:
+            The model instance matching the given ID, or None if id is None.
+
+        Raises:
+            KeyError: If no row is found for the given ID.
+        """
         if id is None:
             return None
 
         result = self.select(f"{self.pk} = ?", [id])
-
-        if result is None or len(result) == 0:
-            raise KeyError(f"No row found for {self.pk} = {id}")
-
-        return result[0]
+        return self._get_single_result(result, self.pk, id)
 
     @property
     def exists(self) -> bool:
@@ -307,11 +348,11 @@ class Table:
         """Return True if the table is not empty, False otherwise."""
         return not self.empty
 
-    def __iter__(self):
+    def __iter__(self) -> Iterator[Any]:
         """Iterate over all rows in the table as model instances."""
         yield from self.select()
 
-    def __getitem__(self, key):
+    def __getitem__(self, key: Any) -> Any:
         """Return a single row from the table by its primary key.
 
         Parameters
@@ -346,6 +387,21 @@ class Table:
         """
         return self.connection.execute(f"SELECT * FROM {self.table_name}").pl()
 
+    def _get_date_columns(self) -> set[str]:
+        """Return the set of date columns that need special handling.
+
+        Override in subclasses or configure via model_class to customize
+        which columns are treated as dates for CSV/Parquet export.
+
+        Returns:
+            Set of column names that should be cast to VARCHAR for export.
+        """
+        # Check if model class has date_columns defined
+        if hasattr(self.model_class, "date_columns"):
+            return set(self.model_class.date_columns)
+        # Default: common date column names
+        return {"expiry", "date", "timestamp"}
+
     def to_csv(
         self,
         path: str | Path,
@@ -366,13 +422,17 @@ class Table:
             Whether to include column headers.
         overwrite:
             Whether to overwrite an existing file.
+
+        Raises:
+            FileExistsError: If the file exists and overwrite is False.
+            ValidationError: If the path is invalid.
         """
-        from pathlib import Path
+        validated_path = validate_file_path(path)
 
-        path = Path(path)
+        if validated_path.exists() and not overwrite:
+            raise FileExistsError(validated_path)
 
-        if path.exists() and not overwrite:
-            raise FileExistsError(path)
+        escaped_path = escape_path_for_sql(validated_path)
 
         # COPY TO options use standard syntax (no '=' required)
         options = [
@@ -380,11 +440,12 @@ class Table:
             f"HEADER {str(header).upper()}",
         ]
 
-        # Ensure date-like columns (e.g., expiry) are serialized as ISO strings
+        # Ensure date-like columns are serialized as ISO strings
+        date_columns = self._get_date_columns()
         select_cols = []
         for col in self.columns:
-            if col == "expiry":
-                select_cols.append("CAST(expiry AS VARCHAR) AS expiry")
+            if col in date_columns:
+                select_cols.append(f"CAST({col} AS VARCHAR) AS {col}")
             else:
                 select_cols.append(col)
 
@@ -393,7 +454,7 @@ class Table:
             SELECT {", ".join(select_cols)}
             FROM {self.table_name}
         )
-        TO '{path}'
+        TO '{escaped_path}'
         ({", ".join(options)})
         """
 
@@ -416,19 +477,24 @@ class Table:
             Parquet compression codec (snappy, zstd, gzip, uncompressed).
         overwrite:
             Whether to overwrite an existing file.
+
+        Raises:
+            FileExistsError: If the file exists and overwrite is False.
+            ValidationError: If the path is invalid.
         """
-        from pathlib import Path
+        validated_path = validate_file_path(path)
 
-        path = Path(path)
+        if validated_path.exists() and not overwrite:
+            raise FileExistsError(validated_path)
 
-        if path.exists() and not overwrite:
-            raise FileExistsError(path)
+        escaped_path = escape_path_for_sql(validated_path)
 
-        # Ensure date-like columns (e.g., expiry) are serialized as ISO strings
+        # Ensure date-like columns are serialized as ISO strings
+        date_columns = self._get_date_columns()
         select_cols = []
         for col in self.columns:
-            if col == "expiry":
-                select_cols.append("CAST(expiry AS VARCHAR) AS expiry")
+            if col in date_columns:
+                select_cols.append(f"CAST({col} AS VARCHAR) AS {col}")
             else:
                 select_cols.append(col)
 
@@ -437,7 +503,7 @@ class Table:
             SELECT {", ".join(select_cols)}
             FROM {self.table_name}
         )
-        TO '{path}'
+        TO '{escaped_path}'
         (FORMAT PARQUET, COMPRESSION '{compression}')
         """
 
@@ -462,11 +528,16 @@ class Table:
             Field delimiter character.
         header:
             Whether the CSV has a header row.
-        """
-        path = Path(path)
 
-        if not path.exists():
-            raise FileNotFoundError(path)
+        Returns:
+            int: Number of rows imported.
+
+        Raises:
+            FileNotFoundError: If the CSV file doesn't exist.
+            ValidationError: If the path is invalid.
+        """
+        validated_path = validate_file_path(path, must_exist=True)
+        escaped_path = escape_path_for_sql(validated_path)
 
         # read_csv_auto options require KEY=VALUE form
         options = [
@@ -478,7 +549,7 @@ class Table:
         count_sql = f"""
         SELECT COUNT(*)
         FROM read_csv_auto(
-            '{path}',
+            '{escaped_path}',
             {", ".join(options)}
         )
         """
@@ -489,7 +560,7 @@ class Table:
         INSERT INTO {self.table_name}
         SELECT *
         FROM read_csv_auto(
-            '{path}',
+            '{escaped_path}',
             {", ".join(options)}
         )
         """
@@ -504,16 +575,21 @@ class Table:
         ----------
         path:
             Path to the Parquet file.
-        """
-        path = Path(path)
 
-        if not path.exists():
-            raise FileNotFoundError(path)
+        Returns:
+            int: Number of rows imported.
+
+        Raises:
+            FileNotFoundError: If the Parquet file doesn't exist.
+            ValidationError: If the path is invalid.
+        """
+        validated_path = validate_file_path(path, must_exist=True)
+        escaped_path = escape_path_for_sql(validated_path)
 
         # Count rows first for return value
         count_sql = f"""
         SELECT COUNT(*)
-        FROM read_parquet('{path}')
+        FROM read_parquet('{escaped_path}')
         """
 
         row_count = self.connection.execute(count_sql).fetchone()[0]
@@ -521,7 +597,7 @@ class Table:
         insert_sql = f"""
         INSERT INTO {self.table_name}
         SELECT *
-        FROM read_parquet('{path}')
+        FROM read_parquet('{escaped_path}')
         """
 
         self.connection.execute(insert_sql)

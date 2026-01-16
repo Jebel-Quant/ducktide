@@ -24,8 +24,10 @@ from typing import Any
 
 import duckdb
 import polars as pl
+from loguru import logger
 
 from jqr.database.exceptions import QueryError
+from jqr.database.utils.path_validation import escape_path_for_sql, validate_file_path
 
 
 @dataclass
@@ -158,9 +160,10 @@ class TimeSeriesDB:
         try:
             query, params = self._build_query(table, instrument_id, start, end)
             return self.con.execute(query, params).pl().sort(self.time_col)
-        except Exception:
+        except Exception as exc:
             # Graceful error handling: on any error (SQL, invalid params, or
             # internal build errors), return an empty DataFrame.
+            logger.warning(f"Failed to query timeseries from '{table}': {exc}")
             return pl.DataFrame()
 
     def _build_query(
@@ -304,49 +307,93 @@ class TimeSeriesDB:
         self.con.execute(f"INSERT INTO {quoted_table} SELECT * FROM temp")
         self.con.unregister("temp")
 
-    def import_csv(self, csv_path: str, table: str) -> None:
-        """Create or replace a table from a CSV file."""
+    def import_csv(self, csv_path: str | Path, table: str) -> None:
+        """Create or replace a table from a CSV file.
+
+        Args:
+            csv_path: Path to the CSV file to import.
+            table: Name of the destination table.
+
+        Raises:
+            FileNotFoundError: If the CSV file doesn't exist.
+            ValidationError: If the path is invalid.
+        """
+        validated_path = validate_file_path(csv_path, must_exist=True)
+        escaped_path = escape_path_for_sql(validated_path)
         table_q = self._quote_identifier(table)
         self.con.execute(f"DROP TABLE IF EXISTS {table_q}")
         self.con.execute(
             f"""
             CREATE TABLE {table_q} AS
-            SELECT * FROM read_csv_auto('{csv_path}')
+            SELECT * FROM read_csv_auto('{escaped_path}')
             """
         )
 
-    def export_csv(self, table: str, csv_path: str) -> None:
-        """Export a table to a CSV file."""
+    def export_csv(self, table: str, csv_path: str | Path) -> None:
+        """Export a table to a CSV file.
+
+        Args:
+            table: Name of the table to export.
+            csv_path: Path to the output CSV file.
+
+        Raises:
+            QueryError: If the table doesn't exist.
+            ValidationError: If the path is invalid.
+        """
         if not self.has_table(table):
             raise QueryError(f"Table '{table}' does not exist")
 
+        validated_path = validate_file_path(csv_path)
+        escaped_path = escape_path_for_sql(validated_path)
         table_q = self._quote_identifier(table)
-        self.con.execute(f"COPY (SELECT * FROM {table_q}) TO '{csv_path}' (HEADER, DELIMITER ',')")
+        self.con.execute(f"COPY (SELECT * FROM {table_q}) TO '{escaped_path}' (HEADER, DELIMITER ',')")
 
-    def import_parquet(self, pq_path: str, table: str) -> None:
-        """Create or replace a table from a Parquet file."""
+    def import_parquet(self, pq_path: str | Path, table: str) -> None:
+        """Create or replace a table from a Parquet file.
+
+        Args:
+            pq_path: Path to the Parquet file to import.
+            table: Name of the destination table.
+
+        Raises:
+            FileNotFoundError: If the Parquet file doesn't exist.
+            ValidationError: If the path is invalid.
+        """
+        validated_path = validate_file_path(pq_path, must_exist=True)
+        escaped_path = escape_path_for_sql(validated_path)
         table_q = self._quote_identifier(table)
         self.con.execute(f"DROP TABLE IF EXISTS {table_q}")
         self.con.execute(
             f"""
             CREATE TABLE {table_q} AS
-            SELECT * FROM read_parquet('{pq_path}')
+            SELECT * FROM read_parquet('{escaped_path}')
             """
         )
 
-    def export_parquet(self, table: str, pq_path: str) -> None:
-        """Export a table to a Parquet file."""
+    def export_parquet(self, table: str, pq_path: str | Path) -> None:
+        """Export a table to a Parquet file.
+
+        Args:
+            table: Name of the table to export.
+            pq_path: Path to the output Parquet file.
+
+        Raises:
+            QueryError: If the table doesn't exist.
+            ValidationError: If the path is invalid.
+        """
         if not self.has_table(table):
             raise QueryError(f"Table '{table}' does not exist")
 
+        validated_path = validate_file_path(pq_path)
+        escaped_path = escape_path_for_sql(validated_path)
         table_q = self._quote_identifier(table)
         self.con.execute(
             f"""
             COPY (SELECT * FROM {table_q})
-            TO '{pq_path}' (FORMAT 'PARQUET')
+            TO '{escaped_path}' (FORMAT 'PARQUET')
             """
         )
 
-    def close(self):
+    def close(self) -> None:
         """Close the database connection."""
         self.con.close()

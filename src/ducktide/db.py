@@ -8,7 +8,8 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from pathlib import Path
-from typing import Any
+from types import TracebackType
+from typing import Any, Self
 
 import duckdb
 
@@ -165,8 +166,12 @@ class DB:
         """
         self.connection.close()
 
-    def cursor(self):
-        """Return a DB-API compatible cursor from the underlying connection."""
+    def cursor(self) -> duckdb.DuckDBPyConnection:
+        """Return a DB-API compatible cursor from the underlying connection.
+
+        Returns:
+            duckdb.DuckDBPyConnection: A cursor for executing database operations.
+        """
         return self.connection.cursor()
 
     def commit(self) -> None:
@@ -192,11 +197,11 @@ class DB:
         for (table_name,) in tables:
             self.connection.execute(f"DROP TABLE IF EXISTS {table_name}")
 
-    def __enter__(self):
+    def __enter__(self) -> Self:
         """Enter the runtime context for the DB object.
 
         Returns:
-            DB: The database instance itself.
+            Self: The database instance itself.
 
         Example:
             >>> from jqr.database.db import DB
@@ -207,6 +212,17 @@ class DB:
         """
         return self
 
-    def __exit__(self, exc_type, exc_value, traceback):
-        """Exit the runtime context for the DB object, closing the connection."""
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_value: BaseException | None,
+        traceback: TracebackType | None,
+    ) -> None:
+        """Exit the runtime context for the DB object, closing the connection.
+
+        Args:
+            exc_type: The exception type if an exception was raised, or None.
+            exc_value: The exception instance if an exception was raised, or None.
+            traceback: The traceback if an exception was raised, or None.
+        """
         self.close()
