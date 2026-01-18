@@ -31,6 +31,7 @@ app = marimo.App(width="medium")
 with app.setup:
     from dataclasses import dataclass
     from datetime import date, datetime
+    from typing import ClassVar
 
     import polars as pl
 
@@ -84,8 +85,8 @@ def cell_define_model():
         # Required metadata for jqr.database.Table
         _table_name = "trades"
         _primary_key = "trade_id"
-        _columns = ["trade_id", "symbol", "price", "quantity", "timestamp"]
-        _schema = {
+        _columns: ClassVar[list[str]] = ["trade_id", "symbol", "price", "quantity", "timestamp"]
+        _schema: ClassVar[dict[str, str]] = {
             "trade_id": "INTEGER PRIMARY KEY",
             "symbol": "TEXT NOT NULL",
             "price": "DOUBLE",

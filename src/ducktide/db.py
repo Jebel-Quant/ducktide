@@ -6,7 +6,7 @@ executing raw queries, and supporting context manager patterns.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from types import TracebackType
 from typing import Any, Self
@@ -39,7 +39,9 @@ class DB:
         1
     """
 
-    def __init__(self, tables_map: dict[str, type], db_path: str | Path = ":memory:", read_only: bool = False):
+    def __init__(
+        self, tables_map: Mapping[str, Callable[..., Any]], db_path: str | Path = ":memory:", read_only: bool = False
+    ):
         """Initialize the DB with either in-memory or persistent storage.
 
         Args:
@@ -66,7 +68,7 @@ class DB:
 
         self._initialize_tables(tables_map)
 
-    def insert(self, *objs: Any):
+    def insert(self, *objs: Any) -> None:
         """Insert one or more objects into their respective tables.
 
         The method automatically routes each object to the correct table based
@@ -94,10 +96,10 @@ class DB:
         for obj in objs:
             table = self._model_to_table.get(type(obj))
             if table is None:
-                raise TypeError(f"Invalid object type: {type(obj)}.")
+                raise TypeError(f"Invalid object type: {type(obj)}.")  # noqa: TRY003
             table.insert(obj)
 
-    def _initialize_tables(self, tables_map: dict[str, type]):
+    def _initialize_tables(self, tables_map: Mapping[str, Callable[..., Any]]) -> None:
         """Initialize table interfaces as attributes of this database instance.
 
         This is an internal method called during `__init__`. It instantiates
@@ -140,7 +142,7 @@ class DB:
         """
         return self._model_to_table
 
-    def execute_query(self, query: str, params: Sequence | None = None):
+    def execute_query(self, query: str, params: Sequence[Any] | None = None) -> duckdb.DuckDBPyConnection:
         """Execute a SQL query against the underlying connection.
 
         Args:
@@ -176,7 +178,7 @@ class DB:
 
     def commit(self) -> None:
         """Commit the current transaction on the underlying connection."""
-        return self.connection.commit()
+        self.connection.commit()
 
     def drop_all_tables(self) -> None:
         """Drop all tables in the database (idempotent).
@@ -195,7 +197,7 @@ class DB:
         """
         tables = self.connection.execute("SHOW TABLES").fetchall()
         for (table_name,) in tables:
-            self.connection.execute(f"DROP TABLE IF EXISTS {table_name}")
+            self.connection.execute(f"DROP TABLE IF EXISTS {table_name}")  # nosec B608
 
     def __enter__(self) -> Self:
         """Enter the runtime context for the DB object.

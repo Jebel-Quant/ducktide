@@ -8,6 +8,8 @@ time series data sources without direct dependencies.
 from datetime import date
 from typing import Protocol
 
+import polars as pl
+
 
 class TimeSeriesRepository(Protocol):
     """Protocol defining the interface for time series data repositories.
@@ -18,7 +20,9 @@ class TimeSeriesRepository(Protocol):
     while maintaining a consistent interface for clients.
     """
 
-    def get_timeseries_frame(self, table: str, instrument_id: int, start: date | None, end: date | None):
+    def get_timeseries_frame(
+        self, table: str, instrument_id: int, start: date | None, end: date | None
+    ) -> pl.DataFrame:
         """Retrieve time series data as a Polars DataFrame.
 
         Args:

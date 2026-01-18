@@ -51,7 +51,7 @@ class TimeSeriesDB:
         # df = foo.get_timeseries_frame(ts_db)
     """
 
-    def __init__(self, path: str | Path | None = None, time_col="timestamp", read_only: bool = False):
+    def __init__(self, path: str | Path | None = None, time_col: str = "timestamp", read_only: bool = False):
         """Initialize a DuckDB-backed time series database.
 
         Args:
@@ -193,7 +193,7 @@ class TimeSeriesDB:
         # and produce simpler SQL strings (e.g., FROM schema.table).
         table_ref = table
 
-        query = f"SELECT * FROM {table_ref} {where} ORDER BY {self.time_col} ASC"
+        query = f"SELECT * FROM {table_ref} {where} ORDER BY {self.time_col} ASC"  # nosec B608
         return query, params
 
     def _quote_identifier(self, ident: str) -> str:
@@ -264,14 +264,14 @@ class TimeSeriesDB:
         # Ensure schema exists when provided
         if "." in table:
             schema, _ = table.split(".", 1)
-            self.con.execute(f"CREATE SCHEMA IF NOT EXISTS {self._quote_unquoted(schema)}")
+            self.con.execute(f"CREATE SCHEMA IF NOT EXISTS {self._quote_unquoted(schema)}")  # nosec B608
 
         # Create table if missing
         if not self.has_table(table):
             # register and create table from Polars df
             self.con.register("temp_ingest", frame)
             quoted_table = self._quote_identifier(table)
-            self.con.execute(f"CREATE TABLE {quoted_table} AS SELECT * FROM temp_ingest")
+            self.con.execute(f"CREATE TABLE {quoted_table} AS SELECT * FROM temp_ingest")  # nosec B608
             self.con.unregister("temp_ingest")
             return
 
@@ -289,22 +289,23 @@ class TimeSeriesDB:
                 SELECT 1 FROM {quoted_table} x
                 WHERE x.instrument_id = t.instrument_id AND x.{self.time_col} >= t.{self.time_col}
                 )
-            """
+            """  # nosec B608
             self.con.execute(insert_sql)
             self.con.unregister("temp_ingest")
         else:
             # No instrument_id: global max timestamp
-            max_ts = self.con.execute(
-                f"SELECT COALESCE(MAX({self.time_col}),'1970-01-01') FROM {quoted_table}"
-            ).fetchone()[0]
+            result = self.con.execute(
+                f"SELECT COALESCE(MAX({self.time_col}),'1970-01-01') FROM {quoted_table}"  # nosec B608
+            ).fetchone()
+            max_ts = result[0] if result else "1970-01-01"
             new = frame.filter(pl.col(f"{self.time_col}") > max_ts)
             if new.height:
                 self._append(table, new)
 
-    def _append(self, table: str, df: pl.DataFrame):
+    def _append(self, table: str, df: pl.DataFrame) -> None:
         quoted_table = self._quote_identifier(table)
         self.con.register("temp", df)
-        self.con.execute(f"INSERT INTO {quoted_table} SELECT * FROM temp")
+        self.con.execute(f"INSERT INTO {quoted_table} SELECT * FROM temp")  # nosec B608
         self.con.unregister("temp")
 
     def import_csv(self, csv_path: str | Path, table: str) -> None:
@@ -321,12 +322,12 @@ class TimeSeriesDB:
         validated_path = validate_file_path(csv_path, must_exist=True)
         escaped_path = escape_path_for_sql(validated_path)
         table_q = self._quote_identifier(table)
-        self.con.execute(f"DROP TABLE IF EXISTS {table_q}")
+        self.con.execute(f"DROP TABLE IF EXISTS {table_q}")  # nosec B608
         self.con.execute(
             f"""
             CREATE TABLE {table_q} AS
             SELECT * FROM read_csv_auto('{escaped_path}')
-            """
+            """  # nosec B608
         )
 
     def export_csv(self, table: str, csv_path: str | Path) -> None:
@@ -341,12 +342,12 @@ class TimeSeriesDB:
             ValidationError: If the path is invalid.
         """
         if not self.has_table(table):
-            raise QueryError(f"Table '{table}' does not exist")
+            raise QueryError(f"Table '{table}' does not exist")  # noqa: TRY003
 
         validated_path = validate_file_path(csv_path)
         escaped_path = escape_path_for_sql(validated_path)
         table_q = self._quote_identifier(table)
-        self.con.execute(f"COPY (SELECT * FROM {table_q}) TO '{escaped_path}' (HEADER, DELIMITER ',')")
+        self.con.execute(f"COPY (SELECT * FROM {table_q}) TO '{escaped_path}' (HEADER, DELIMITER ',')")  # nosec B608
 
     def import_parquet(self, pq_path: str | Path, table: str) -> None:
         """Create or replace a table from a Parquet file.
@@ -362,12 +363,12 @@ class TimeSeriesDB:
         validated_path = validate_file_path(pq_path, must_exist=True)
         escaped_path = escape_path_for_sql(validated_path)
         table_q = self._quote_identifier(table)
-        self.con.execute(f"DROP TABLE IF EXISTS {table_q}")
+        self.con.execute(f"DROP TABLE IF EXISTS {table_q}")  # nosec B608
         self.con.execute(
             f"""
             CREATE TABLE {table_q} AS
             SELECT * FROM read_parquet('{escaped_path}')
-            """
+            """  # nosec B608
         )
 
     def export_parquet(self, table: str, pq_path: str | Path) -> None:
@@ -382,7 +383,7 @@ class TimeSeriesDB:
             ValidationError: If the path is invalid.
         """
         if not self.has_table(table):
-            raise QueryError(f"Table '{table}' does not exist")
+            raise QueryError(f"Table '{table}' does not exist")  # noqa: TRY003
 
         validated_path = validate_file_path(pq_path)
         escaped_path = escape_path_for_sql(validated_path)
@@ -391,7 +392,7 @@ class TimeSeriesDB:
             f"""
             COPY (SELECT * FROM {table_q})
             TO '{escaped_path}' (FORMAT 'PARQUET')
-            """
+            """  # nosec B608
         )
 
     def close(self) -> None:

@@ -56,7 +56,7 @@ class TimeSeriesModel(ABC):
 
         table = getattr(type(self), "table_name", None)
         if table is None:
-            raise AttributeError(f"{type(self).__name__} must define table_name")
+            raise AttributeError(f"{type(self).__name__} must define table_name")  # noqa: TRY003
 
         return repo.get_timeseries_frame(
             table=table,

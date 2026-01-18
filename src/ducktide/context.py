@@ -95,7 +95,7 @@ def get_default_db() -> DB | object:
     """
     db = _default_db.get()
     if db is None:
-        raise RuntimeError(
+        raise RuntimeError(  # noqa: TRY003
             "No default Database set for this context. "
             "Pass a Database explicitly or use `jqr.database.context.use_db(db)` / set_default_db(db)."
         )

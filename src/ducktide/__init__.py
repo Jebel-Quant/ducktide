@@ -42,4 +42,4 @@ from .db import DB
 from .table import Table
 from .time import TimeSeriesDB, TimeSeriesModel, TimeSeriesRepository
 
-__all__ = ["DB", "TimeSeriesDB", "TimeSeriesModel", "TimeSeriesRepository", "Table", "context", "exceptions", "orm"]
+__all__ = ["DB", "Table", "TimeSeriesDB", "TimeSeriesModel", "TimeSeriesRepository", "context", "exceptions", "orm"]

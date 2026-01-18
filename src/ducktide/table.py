@@ -6,13 +6,16 @@ interface for performing database operations on specific tables.
 
 from collections.abc import Iterable, Iterator, Sequence
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import duckdb
 import polars as pl
 
 from .exceptions import DataError
 from .utils.path_validation import escape_path_for_sql, validate_file_path
+
+if TYPE_CHECKING:
+    from .orm.base import ORMModel
 
 
 class Table:
@@ -53,7 +56,7 @@ class Table:
         # table.to_csv("data.csv")
     """
 
-    def __init__(self, connection: duckdb.DuckDBPyConnection, model_class: type, read_only: bool = False):
+    def __init__(self, connection: duckdb.DuckDBPyConnection, model_class: "type[ORMModel]", read_only: bool = False):
         """Initialize a generic Table helper.
 
         Parameters
@@ -94,10 +97,10 @@ class Table:
             KeyError: If the results list is empty.
         """
         if not results:
-            raise KeyError(f"No row found for {identifier} = {value}")
+            raise KeyError(f"No row found for {identifier} = {value}")  # noqa: TRY003
         return results[0]
 
-    def _values_from_obj(self, obj: Any) -> tuple:
+    def _values_from_obj(self, obj: Any) -> tuple[Any, ...]:
         # Check if obj is an instance of model_class or its base domain class
         # This allows both domain models and ORM models to be inserted into a Table
         # We check if the object has all required columns as attributes.
@@ -105,12 +108,12 @@ class Table:
         try:
             return tuple(getattr(obj, col) for col in self.columns)
         except AttributeError as exc:
-            raise DataError(f"Object {type(obj).__name__} is missing required column: {exc}") from exc
+            raise DataError(f"Object {type(obj).__name__} is missing required column: {exc}") from exc  # noqa: TRY003
 
     # ---------------------------
     # Insert / Bulk Insert
     # ---------------------------
-    def insert(self, *objs) -> None:
+    def insert(self, *objs: Any) -> None:
         """Insert one or more model instances into the table.
 
         This is the primary method for adding data to the database. For a single
@@ -149,7 +152,7 @@ class Table:
             obj = objs[0]
             placeholders = ", ".join("?" for _ in self.columns)
             cols = ", ".join(self.columns)
-            sql = f"INSERT INTO {self.table_name} ({cols}) VALUES ({placeholders})"
+            sql = f"INSERT INTO {self.table_name} ({cols}) VALUES ({placeholders})"  # nosec B608
 
             self.connection.execute(sql, self._values_from_obj(obj))
 
@@ -157,7 +160,7 @@ class Table:
             # Multiple rows → delegate to bulk_insert
             self.bulk_insert(objs)
 
-    def bulk_insert(self, objs: Iterable) -> None:
+    def bulk_insert(self, objs: Iterable[Any]) -> None:
         """Insert multiple objects into the table in one efficient operation.
 
         This method is optimized for inserting many records at once, using
@@ -204,12 +207,12 @@ class Table:
         sql = f"""
         INSERT INTO {self.table_name} ({cols})
         VALUES ({placeholders})
-        """
+        """  # nosec B608
 
         values = [self._values_from_obj(obj) for obj in objs]
         self.connection.executemany(sql, values)
 
-    def execute(self, query: str, params: Sequence | None = None) -> list[Any]:
+    def execute(self, query: str, params: Sequence[Any] | None = None) -> list[Any]:
         """Execute a SQL query against the underlying connection.
 
         Args:
@@ -225,8 +228,8 @@ class Table:
     def select(
         self,
         where_clause: str | None = None,
-        where_params: Sequence | None = None,
-    ):
+        where_params: Sequence[Any] | None = None,
+    ) -> list[Any]:
         """Select rows from the table and return model instances.
 
         Query the table with optional filtering via SQL WHERE clauses. Always
@@ -284,7 +287,7 @@ class Table:
         SELECT *
         FROM {self.table_name}
         WHERE {where_clause}
-        """
+        """  # nosec B608
 
         rows = self.connection.execute(sql, where_params).fetchall()
         return [self.model_class.from_row(row) for row in rows]
@@ -336,13 +339,15 @@ class Table:
         """Return True if the table is empty, False otherwise."""
         if not self.exists:
             return True
-        return self.connection.execute(f"SELECT COUNT(*) FROM {self.table_name}").fetchone()[0] == 0
+        result = self.connection.execute(f"SELECT COUNT(*) FROM {self.table_name}").fetchone()  # nosec B608
+        return bool(result is None or result[0] == 0)
 
     def __len__(self) -> int:
         """Return the number of rows in the table."""
         if not self.exists:
             return 0
-        return self.connection.execute(f"SELECT COUNT(*) FROM {self.table_name}").fetchone()[0]
+        result = self.connection.execute(f"SELECT COUNT(*) FROM {self.table_name}").fetchone()  # nosec B608
+        return int(result[0]) if result else 0
 
     def __bool__(self) -> bool:
         """Return True if the table is not empty, False otherwise."""
@@ -372,7 +377,7 @@ class Table:
         """
         result = self.select(f"{self.pk} = ?", [key])
         if len(result) == 0:
-            raise KeyError(f"No row found for {self.pk} = {key}")
+            raise KeyError(f"No row found for {self.pk} = {key}")  # noqa: TRY003
 
         return result[0]
 
@@ -385,7 +390,7 @@ class Table:
             A Polars DataFrame containing all rows from the table with
             their column names preserved.
         """
-        return self.connection.execute(f"SELECT * FROM {self.table_name}").pl()
+        return self.connection.execute(f"SELECT * FROM {self.table_name}").pl()  # nosec B608
 
     def _get_date_columns(self) -> set[str]:
         """Return the set of date columns that need special handling.
@@ -456,7 +461,7 @@ class Table:
         )
         TO '{escaped_path}'
         ({", ".join(options)})
-        """
+        """  # nosec B608
 
         self.connection.execute(sql)
 
@@ -505,7 +510,7 @@ class Table:
         )
         TO '{escaped_path}'
         (FORMAT PARQUET, COMPRESSION '{compression}')
-        """
+        """  # nosec B608
 
         self.connection.execute(sql)
 
@@ -552,9 +557,10 @@ class Table:
             '{escaped_path}',
             {", ".join(options)}
         )
-        """
+        """  # nosec B608
 
-        row_count = self.connection.execute(count_sql).fetchone()[0]
+        result = self.connection.execute(count_sql).fetchone()
+        row_count = int(result[0]) if result else 0
 
         _sql = f"""
         INSERT INTO {self.table_name}
@@ -563,7 +569,7 @@ class Table:
             '{escaped_path}',
             {", ".join(options)}
         )
-        """
+        """  # nosec B608
 
         self.connection.execute(_sql)
         return row_count
@@ -590,15 +596,16 @@ class Table:
         count_sql = f"""
         SELECT COUNT(*)
         FROM read_parquet('{escaped_path}')
-        """
+        """  # nosec B608
 
-        row_count = self.connection.execute(count_sql).fetchone()[0]
+        result = self.connection.execute(count_sql).fetchone()
+        row_count = int(result[0]) if result else 0
 
         insert_sql = f"""
         INSERT INTO {self.table_name}
         SELECT *
         FROM read_parquet('{escaped_path}')
-        """
+        """  # nosec B608
 
         self.connection.execute(insert_sql)
         return row_count

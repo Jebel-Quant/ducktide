@@ -108,7 +108,7 @@ class ORMModel(ABC):
     _columns: ClassVar[list[str]]  # column order in the database
     _domain_model: ClassVar[type | None] = None  # domain model class
 
-    def __init_subclass__(cls, **kwargs):
+    def __init_subclass__(cls, **kwargs: object) -> None:
         """Initialize subclass and automatically set _columns if not provided.
 
         This hook is called when a new subclass of ORMModel is created. It
@@ -157,7 +157,7 @@ class ORMModel(ABC):
                 cls._columns = [k for k in cls._schema.keys() if " " not in k and "(" not in k]
 
     @classmethod
-    def generate_create_table_sql(cls):
+    def generate_create_table_sql(cls) -> str:
         """Generate a CREATE TABLE SQL statement from the model's schema definition.
 
         This method constructs a SQL CREATE TABLE statement using the model's
@@ -226,4 +226,4 @@ class ORMModel(ABC):
             Users don't need to call it directly - use the Table interface instead.
         """
         columns = cls._columns
-        return cls(**dict(zip(columns, row)))
+        return cls(**dict(zip(columns, row, strict=False)))

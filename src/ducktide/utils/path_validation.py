@@ -47,14 +47,14 @@ def validate_file_path(path: str | Path, must_exist: bool = False) -> Path:
 
     # Check for null bytes (common attack vector)
     if "\x00" in path_str:
-        raise ValidationError("Invalid path: contains null byte")
+        raise ValidationError("Invalid path: contains null byte")  # noqa: TRY003
 
     # Convert to Path and resolve to absolute path
     resolved = Path(path).resolve()
 
     # Check for existence if required
     if must_exist and not resolved.exists():
-        raise FileNotFoundError(f"File not found: {resolved}")
+        raise FileNotFoundError(f"File not found: {resolved}")  # noqa: TRY003
 
     return resolved
 
