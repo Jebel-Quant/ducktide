@@ -21,7 +21,13 @@ class TimeSeriesRepository(Protocol):
     """
 
     def get_timeseries_frame(
-        self, table: str, instrument_id: int, start: date | None, end: date | None
+        self,
+        table: str,
+        instrument_id: int,
+        start: date | None,
+        end: date | None,
+        timezone: str | None = None,
+        every: str | None = None,
     ) -> pl.DataFrame:
         """Retrieve time series data as a Polars DataFrame.
 
@@ -30,8 +36,14 @@ class TimeSeriesRepository(Protocol):
             instrument_id: The ID of the instrument to retrieve data for
             start: Optional start date to filter the data
             end: Optional end date to filter the data
+            timezone: Optional target timezone for the timestamp column
+            every: Optional resampling frequency
 
         Returns:
             polars.DataFrame containing the time series data
         """
+        ...
+
+    def ingest(self, table: str, frame: pl.DataFrame):
+        """Ingest time series data into the repository."""
         ...

@@ -109,6 +109,7 @@ class TimeSeriesDB:
         instrument_id: int | None = None,
         start: date | None = None,
         end: date | None = None,
+        timezone: str | None = None,
     ) -> pl.DataFrame:
         """Return a time-ordered Polars DataFrame from a time series table.
 
@@ -123,6 +124,8 @@ class TimeSeriesDB:
                 All rows with timestamp >= start will be included.
             end: Optional inclusive upper bound for the timestamp column.
                 All rows with timestamp <= end will be included.
+            timezone: Optional target timezone for the timestamp column.
+                If provided, naive timestamps will be converted to this timezone.
 
         Returns:
             pl.DataFrame: A Polars DataFrame sorted by timestamp in ascending order.
@@ -159,12 +162,31 @@ class TimeSeriesDB:
 
         try:
             query, params = self._build_query(table, instrument_id, start, end)
-            return self.con.execute(query, params).pl().sort(self.time_col)
+            frame = self.con.execute(query, params).pl().sort(self.time_col)
+
+            if timezone is not None:
+                # Polars: convert timestamp to target timezone
+                # Only attempt conversion if the column is a Datetime type
+                if frame[self.time_col].dtype.is_temporal():
+                    # If it's just a Date, we might want to cast it to Datetime first or skip
+                    # Most financial data with timezones will be Datetime.
+                    # dt.convert_time_zone requires Datetime.
+                    if isinstance(frame[self.time_col].dtype, pl.Datetime):
+                        frame = frame.with_columns(pl.col(self.time_col).dt.convert_time_zone(timezone))
+                    elif isinstance(frame[self.time_col].dtype, pl.Date):
+                        # For Date, conversion doesn't make much sense without time,
+                        # but we should at least not crash.
+                        # Optionally cast to datetime then convert?
+                        # Usually, if user asks for timezone, they expect Datetime.
+                        pass
+
         except Exception as exc:
             # Graceful error handling: on any error (SQL, invalid params, or
             # internal build errors), return an empty DataFrame.
             logger.warning(f"Failed to query timeseries from '{table}': {exc}")
             return pl.DataFrame()
+        else:
+            return frame
 
     def _build_query(
         self,
@@ -279,19 +301,39 @@ class TimeSeriesDB:
         quoted_table = self._quote_identifier(table)
 
         if "instrument_id" in frame.columns:
-            # Vectorized single-SQL approach: insert rows from temp where
-            # timestamp > coalesce(max(timestamp) for that instrument)
-            self.con.register("temp_ingest", frame)
-            insert_sql = f"""
-                INSERT INTO {quoted_table}
-                SELECT * FROM temp_ingest t
-                WHERE NOT EXISTS (
-                SELECT 1 FROM {quoted_table} x
-                WHERE x.instrument_id = t.instrument_id AND x.{self.time_col} >= t.{self.time_col}
-                )
+            # Optimized approach: Get max timestamp per instrument from the database
+            # to filter the incoming frame before ingestion.
+            # This avoids the expensive WHERE NOT EXISTS subquery for every row.
+            logger.info(f"Ingesting {len(frame)} rows into '{table}'...")
+
+            # 1. Get existing max timestamps per instrument
+            sql = f"""
+                SELECT instrument_id, MAX({self.time_col}) as max_ts
+                FROM {quoted_table}
+                GROUP BY instrument_id
             """  # nosec B608
-            self.con.execute(insert_sql)
-            self.con.unregister("temp_ingest")
+            max_ts_df = self.con.execute(sql).pl()
+
+            if max_ts_df.height > 0:
+                # 2. Join and filter in Polars (usually faster than complex SQL anti-joins in this context)
+                # Ensure time zones match for comparison if we have Datetime
+                dtype = frame.schema[self.time_col]
+                if isinstance(dtype, pl.Datetime) and dtype.time_zone:
+                    df_tz = dtype.time_zone
+                    max_ts_df = max_ts_df.with_columns(pl.col("max_ts").dt.convert_time_zone(df_tz))
+
+                new_frame = frame.join(max_ts_df, on="instrument_id", how="left")
+                new_frame = new_frame.filter(
+                    (pl.col("max_ts").is_null()) | (pl.col(self.time_col) > pl.col("max_ts"))
+                ).drop("max_ts")
+            else:
+                new_frame = frame
+
+            if new_frame.height > 0:
+                logger.info(f"Appending {len(new_frame)} new rows to '{table}'...")
+                self._append(table, new_frame)
+            else:
+                logger.info(f"No new rows to append to '{table}'.")
         else:
             # No instrument_id: global max timestamp
             result = self.con.execute(
@@ -394,6 +436,14 @@ class TimeSeriesDB:
             TO '{escaped_path}' (FORMAT 'PARQUET')
             """  # nosec B608
         )
+
+    def __enter__(self):
+        """Enter the runtime context related to this object."""
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        """Exit the runtime context related to this object."""
+        self.close()
 
     def close(self) -> None:
         """Close the database connection."""
