@@ -121,4 +121,4 @@ class TimeSeriesModel(ABC):
         # to the frame add the instrument_id column
         frame = frame.with_columns(instrument_id=pl.lit(self.instrument_id).cast(pl.Int64))
 
-        return repo.ingest(table=table, frame=frame)
+        repo.ingest(table=table, frame=frame)

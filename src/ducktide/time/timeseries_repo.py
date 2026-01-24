@@ -44,6 +44,6 @@ class TimeSeriesRepository(Protocol):
         """
         ...
 
-    def ingest(self, table: str, frame: pl.DataFrame):
+    def ingest(self, table: str, frame: pl.DataFrame) -> None:
         """Ingest time series data into the repository."""
         ...

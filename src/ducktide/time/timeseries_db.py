@@ -437,11 +437,11 @@ class TimeSeriesDB:
             """  # nosec B608
         )
 
-    def __enter__(self):
+    def __enter__(self) -> "TimeSeriesDB":
         """Enter the runtime context related to this object."""
         return self
 
-    def __exit__(self, exc_type, exc_val, exc_tb):
+    def __exit__(self, exc_type: type[BaseException] | None, exc_val: BaseException | None, exc_tb: Any) -> None:
         """Exit the runtime context related to this object."""
         self.close()
 
