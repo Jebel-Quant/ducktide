@@ -53,7 +53,7 @@ from typing import Any, ClassVar, Self
 from pydantic import BaseModel, ConfigDict
 
 
-class DomainModel(BaseModel):  # type: ignore[misc]
+class DomainModel(BaseModel):
     """Base class for domain models.
 
     This class provides a common base for all domain models in JQR,
