@@ -101,6 +101,17 @@ class Table:
         return results[0]
 
     def _values_from_obj(self, obj: Any) -> tuple[Any, ...]:
+        """Extract column values from an object as a tuple.
+
+        Args:
+            obj: A model instance with attributes matching the table columns.
+
+        Returns:
+            A tuple of values in column order.
+
+        Raises:
+            DataError: If the object is missing a required column attribute.
+        """
         # Check if obj is an instance of model_class or its base domain class
         # This allows both domain models and ORM models to be inserted into a Table
         # We check if the object has all required columns as attributes.

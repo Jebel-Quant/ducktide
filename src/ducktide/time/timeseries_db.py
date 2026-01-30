@@ -195,6 +195,17 @@ class TimeSeriesDB:
         start: date | None,
         end: date | None,
     ) -> tuple[str, list[Any]]:
+        """Build a SQL SELECT query with optional filters.
+
+        Args:
+            table: The table name to query.
+            instrument_id: Optional instrument ID filter.
+            start: Optional start date filter (inclusive).
+            end: Optional end date filter (inclusive).
+
+        Returns:
+            A tuple of (SQL query string, list of parameters).
+        """
         conditions: list[str] = []
         params: list[Any] = []
 
@@ -219,6 +230,14 @@ class TimeSeriesDB:
         return query, params
 
     def _quote_identifier(self, ident: str) -> str:
+        """Quote a table or schema identifier for safe SQL use.
+
+        Args:
+            ident: The identifier to quote, optionally schema-qualified (e.g., "schema.table").
+
+        Returns:
+            A quoted identifier string safe for use in SQL statements.
+        """
         # duckdb compatible quoting
         if "." in ident:
             schema, name = ident.split(".", 1)
@@ -232,7 +251,14 @@ class TimeSeriesDB:
     # Ingestion
     # ---------------------
     def _quote_unquoted(self, ident: str) -> str:
-        # Return safe unquoted identifier (avoid double quotes in input)
+        """Sanitize an identifier by removing any embedded quotes.
+
+        Args:
+            ident: The identifier to sanitize.
+
+        Returns:
+            The identifier with all double-quote characters removed.
+        """
         return ident.replace('"', "")
 
     def ingest(self, table: str, frame: pl.DataFrame) -> None:
@@ -345,6 +371,12 @@ class TimeSeriesDB:
                 self._append(table, new)
 
     def _append(self, table: str, df: pl.DataFrame) -> None:
+        """Append rows from a DataFrame to an existing table.
+
+        Args:
+            table: The destination table name.
+            df: The Polars DataFrame containing rows to append.
+        """
         quoted_table = self._quote_identifier(table)
         self.con.register("temp", df)
         self.con.execute(f"INSERT INTO {quoted_table} SELECT * FROM temp")  # nosec B608
