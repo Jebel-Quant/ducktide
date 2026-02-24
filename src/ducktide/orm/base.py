@@ -151,10 +151,11 @@ class ORMModel(ABC):
             cls._table_name = name
 
         # Automatically determine _columns from _schema keys if not explicitly defined
-        if not hasattr(cls, "_columns") or cls._columns is getattr(ORMModel, "_columns", None):
-            if hasattr(cls, "_schema"):
-                # Filter out entries that are not columns (e.g., FOREIGN KEY constraints)
-                cls._columns = [k for k in cls._schema.keys() if " " not in k and "(" not in k]
+        if (not hasattr(cls, "_columns") or cls._columns is getattr(ORMModel, "_columns", None)) and hasattr(
+            cls, "_schema"
+        ):
+            # Filter out entries that are not columns (e.g., FOREIGN KEY constraints)
+            cls._columns = [k for k in cls._schema if " " not in k and "(" not in k]
 
     @classmethod
     def generate_create_table_sql(cls) -> str:

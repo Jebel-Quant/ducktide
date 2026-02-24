@@ -6,7 +6,7 @@ interface for performing database operations on specific tables.
 
 from collections.abc import Iterable, Iterator, Sequence
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 import duckdb
 import polars as pl
@@ -163,7 +163,7 @@ class Table:
             obj = objs[0]
             placeholders = ", ".join("?" for _ in self.columns)
             cols = ", ".join(self.columns)
-            sql = f"INSERT INTO {self.table_name} ({cols}) VALUES ({placeholders})"  # nosec B608
+            sql = f"INSERT INTO {self.table_name} ({cols}) VALUES ({placeholders})"  # nosec B608  # noqa: S608
 
             self.connection.execute(sql, self._values_from_obj(obj))
 
@@ -218,7 +218,7 @@ class Table:
         sql = f"""
         INSERT INTO {self.table_name} ({cols})
         VALUES ({placeholders})
-        """  # nosec B608
+        """  # nosec B608  # noqa: S608
 
         values = [self._values_from_obj(obj) for obj in objs]
         self.connection.executemany(sql, values)
@@ -298,7 +298,7 @@ class Table:
         SELECT *
         FROM {self.table_name}
         WHERE {where_clause}
-        """  # nosec B608
+        """  # nosec B608  # noqa: S608
 
         rows = self.connection.execute(sql, where_params).fetchall()
         return [self.model_class.from_row(row) for row in rows]
@@ -350,14 +350,14 @@ class Table:
         """Return True if the table is empty, False otherwise."""
         if not self.exists:
             return True
-        result = self.connection.execute(f"SELECT COUNT(*) FROM {self.table_name}").fetchone()  # nosec B608
+        result = self.connection.execute(f"SELECT COUNT(*) FROM {self.table_name}").fetchone()  # nosec B608  # noqa: S608
         return bool(result is None or result[0] == 0)
 
     def __len__(self) -> int:
         """Return the number of rows in the table."""
         if not self.exists:
             return 0
-        result = self.connection.execute(f"SELECT COUNT(*) FROM {self.table_name}").fetchone()  # nosec B608
+        result = self.connection.execute(f"SELECT COUNT(*) FROM {self.table_name}").fetchone()  # nosec B608  # noqa: S608
         return int(result[0]) if result else 0
 
     def __bool__(self) -> bool:
@@ -401,7 +401,7 @@ class Table:
             A Polars DataFrame containing all rows from the table with
             their column names preserved.
         """
-        return self.connection.execute(f"SELECT * FROM {self.table_name}").pl()  # nosec B608
+        return self.connection.execute(f"SELECT * FROM {self.table_name}").pl()  # nosec B608  # noqa: S608
 
     def _get_date_columns(self) -> set[str]:
         """Return the set of date columns that need special handling.
@@ -414,7 +414,7 @@ class Table:
         """
         # Check if model class has date_columns defined
         if hasattr(self.model_class, "date_columns"):
-            return set(self.model_class.date_columns)
+            return set(cast(Iterable[str], self.model_class.date_columns))
         # Default: common date column names
         return {"expiry", "date", "timestamp"}
 
@@ -472,7 +472,7 @@ class Table:
         )
         TO '{escaped_path}'
         ({", ".join(options)})
-        """  # nosec B608
+        """  # nosec B608  # noqa: S608
 
         self.connection.execute(sql)
 
@@ -521,7 +521,7 @@ class Table:
         )
         TO '{escaped_path}'
         (FORMAT PARQUET, COMPRESSION '{compression}')
-        """  # nosec B608
+        """  # nosec B608  # noqa: S608
 
         self.connection.execute(sql)
 
@@ -568,7 +568,7 @@ class Table:
             '{escaped_path}',
             {", ".join(options)}
         )
-        """  # nosec B608
+        """  # nosec B608  # noqa: S608
 
         result = self.connection.execute(count_sql).fetchone()
         row_count = int(result[0]) if result else 0
@@ -580,7 +580,7 @@ class Table:
             '{escaped_path}',
             {", ".join(options)}
         )
-        """  # nosec B608
+        """  # nosec B608  # noqa: S608
 
         self.connection.execute(_sql)
         return row_count
@@ -607,7 +607,7 @@ class Table:
         count_sql = f"""
         SELECT COUNT(*)
         FROM read_parquet('{escaped_path}')
-        """  # nosec B608
+        """  # nosec B608  # noqa: S608
 
         result = self.connection.execute(count_sql).fetchone()
         row_count = int(result[0]) if result else 0
@@ -616,7 +616,7 @@ class Table:
         INSERT INTO {self.table_name}
         SELECT *
         FROM read_parquet('{escaped_path}')
-        """  # nosec B608
+        """  # nosec B608  # noqa: S608
 
         self.connection.execute(insert_sql)
         return row_count

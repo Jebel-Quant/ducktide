@@ -164,21 +164,20 @@ class TimeSeriesDB:
             query, params = self._build_query(table, instrument_id, start, end)
             frame = self.con.execute(query, params).pl().sort(self.time_col)
 
-            if timezone is not None:
+            if timezone is not None and frame[self.time_col].dtype.is_temporal():
                 # Polars: convert timestamp to target timezone
                 # Only attempt conversion if the column is a Datetime type
-                if frame[self.time_col].dtype.is_temporal():
-                    # If it's just a Date, we might want to cast it to Datetime first or skip
-                    # Most financial data with timezones will be Datetime.
-                    # dt.convert_time_zone requires Datetime.
-                    if isinstance(frame[self.time_col].dtype, pl.Datetime):
-                        frame = frame.with_columns(pl.col(self.time_col).dt.convert_time_zone(timezone))
-                    elif isinstance(frame[self.time_col].dtype, pl.Date):
-                        # For Date, conversion doesn't make much sense without time,
-                        # but we should at least not crash.
-                        # Optionally cast to datetime then convert?
-                        # Usually, if user asks for timezone, they expect Datetime.
-                        pass
+                # If it's just a Date, we might want to cast it to Datetime first or skip
+                # Most financial data with timezones will be Datetime.
+                # dt.convert_time_zone requires Datetime.
+                if isinstance(frame[self.time_col].dtype, pl.Datetime):
+                    frame = frame.with_columns(pl.col(self.time_col).dt.convert_time_zone(timezone))
+                elif isinstance(frame[self.time_col].dtype, pl.Date):
+                    # For Date, conversion doesn't make much sense without time,
+                    # but we should at least not crash.
+                    # Optionally cast to datetime then convert?
+                    # Usually, if user asks for timezone, they expect Datetime.
+                    pass
 
         except Exception as exc:
             # Graceful error handling: on any error (SQL, invalid params, or
@@ -226,7 +225,7 @@ class TimeSeriesDB:
         # and produce simpler SQL strings (e.g., FROM schema.table).
         table_ref = table
 
-        query = f"SELECT * FROM {table_ref} {where} ORDER BY {self.time_col} ASC"  # nosec B608
+        query = f"SELECT * FROM {table_ref} {where} ORDER BY {self.time_col} ASC"  # nosec B608  # noqa: S608
         return query, params
 
     def _quote_identifier(self, ident: str) -> str:
@@ -319,7 +318,7 @@ class TimeSeriesDB:
             # register and create table from Polars df
             self.con.register("temp_ingest", frame)
             quoted_table = self._quote_identifier(table)
-            self.con.execute(f"CREATE TABLE {quoted_table} AS SELECT * FROM temp_ingest")  # nosec B608
+            self.con.execute(f"CREATE TABLE {quoted_table} AS SELECT * FROM temp_ingest")  # nosec B608  # noqa: S608
             self.con.unregister("temp_ingest")
             return
 
@@ -337,7 +336,7 @@ class TimeSeriesDB:
                 SELECT instrument_id, MAX({self.time_col}) as max_ts
                 FROM {quoted_table}
                 GROUP BY instrument_id
-            """  # nosec B608
+            """  # nosec B608  # noqa: S608
             max_ts_df = self.con.execute(sql).pl()
 
             if max_ts_df.height > 0:
@@ -363,7 +362,7 @@ class TimeSeriesDB:
         else:
             # No instrument_id: global max timestamp
             result = self.con.execute(
-                f"SELECT COALESCE(MAX({self.time_col}),'1970-01-01') FROM {quoted_table}"  # nosec B608
+                f"SELECT COALESCE(MAX({self.time_col}),'1970-01-01') FROM {quoted_table}"  # nosec B608  # noqa: S608
             ).fetchone()
             max_ts = result[0] if result else "1970-01-01"
             new = frame.filter(pl.col(f"{self.time_col}") > max_ts)
@@ -379,7 +378,7 @@ class TimeSeriesDB:
         """
         quoted_table = self._quote_identifier(table)
         self.con.register("temp", df)
-        self.con.execute(f"INSERT INTO {quoted_table} SELECT * FROM temp")  # nosec B608
+        self.con.execute(f"INSERT INTO {quoted_table} SELECT * FROM temp")  # nosec B608  # noqa: S608
         self.con.unregister("temp")
 
     def import_csv(self, csv_path: str | Path, table: str) -> None:
@@ -401,7 +400,7 @@ class TimeSeriesDB:
             f"""
             CREATE TABLE {table_q} AS
             SELECT * FROM read_csv_auto('{escaped_path}')
-            """  # nosec B608
+            """  # nosec B608  # noqa: S608
         )
 
     def export_csv(self, table: str, csv_path: str | Path) -> None:
@@ -421,7 +420,7 @@ class TimeSeriesDB:
         validated_path = validate_file_path(csv_path)
         escaped_path = escape_path_for_sql(validated_path)
         table_q = self._quote_identifier(table)
-        self.con.execute(f"COPY (SELECT * FROM {table_q}) TO '{escaped_path}' (HEADER, DELIMITER ',')")  # nosec B608
+        self.con.execute(f"COPY (SELECT * FROM {table_q}) TO '{escaped_path}' (HEADER, DELIMITER ',')")  # nosec B608  # noqa: S608
 
     def import_parquet(self, pq_path: str | Path, table: str) -> None:
         """Create or replace a table from a Parquet file.
@@ -442,7 +441,7 @@ class TimeSeriesDB:
             f"""
             CREATE TABLE {table_q} AS
             SELECT * FROM read_parquet('{escaped_path}')
-            """  # nosec B608
+            """  # nosec B608  # noqa: S608
         )
 
     def export_parquet(self, table: str, pq_path: str | Path) -> None:
@@ -466,7 +465,7 @@ class TimeSeriesDB:
             f"""
             COPY (SELECT * FROM {table_q})
             TO '{escaped_path}' (FORMAT 'PARQUET')
-            """  # nosec B608
+            """  # nosec B608  # noqa: S608
         )
 
     def __enter__(self) -> "TimeSeriesDB":
