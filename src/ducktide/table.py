@@ -17,6 +17,16 @@ from .utils.path_validation import escape_path_for_sql, validate_file_path
 if TYPE_CHECKING:
     from .orm.base import ORMModel
 
+# Suffixes recognized by the keyword filter API, mapped to SQL comparison
+# operators. Checked only after an exact column-name match fails, so a column
+# literally named e.g. "valid_before" still filters by equality.
+_FILTER_SUFFIXES = {
+    "_before": "<",
+    "_after": ">",
+    "_at_or_before": "<=",
+    "_at_or_after": ">=",
+}
+
 
 class Table:
     """Table interface for database operations following the Repository pattern.
@@ -244,25 +254,70 @@ class Table:
         rows = self.connection.execute(query, params).fetchall()
         return [self.model_class.from_row(row) for row in rows]
 
+    def _resolve_filter(self, name: str) -> tuple[str, str]:
+        """Resolve a keyword filter name to a (column, operator) pair.
+
+        Args:
+            name: The filter keyword, either a plain column name (equality) or
+                a column name with a comparison suffix such as ``expiry_before``.
+
+        Returns:
+            A tuple of (validated column name, SQL comparison operator).
+
+        Raises:
+            ValidationError: If the name is not a column of this table, with or
+                without a recognized suffix.
+        """
+        if name in self.columns:
+            return name, "="
+        # Longest suffix first so "_at_or_before" wins over its "_before" tail.
+        for suffix in sorted(_FILTER_SUFFIXES, key=len, reverse=True):
+            column = name.removesuffix(suffix)
+            if column != name and column in self.columns:
+                return column, _FILTER_SUFFIXES[suffix]
+        raise ValidationError(  # noqa: TRY003
+            f"Unknown filter '{name}' for table '{self.table_name}'. "
+            f"Valid columns: {', '.join(self.columns)}. "
+            f"Comparison suffixes: {', '.join(sorted(_FILTER_SUFFIXES))}"
+        )
+
     def select(
         self,
         where_clause: str | None = None,
         where_params: Sequence[Any] | None = None,
+        **filters: Any,
     ) -> list[Any]:
         """Select rows from the table and return model instances.
 
-        Query the table with optional filtering via SQL WHERE clauses. Always
-        uses parameterized queries to prevent SQL injection.
+        Query the table with optional filtering, either via keyword filters
+        (the preferred form) or via a raw SQL WHERE clause (the escape hatch
+        for anything the keywords cannot express). Both forms always use
+        parameterized queries to prevent SQL injection.
+
+        Keyword filters match a column name for equality (``venue="GLBX"``) or
+        a column name plus a comparison suffix: ``_before`` (<), ``_after``
+        (>), ``_at_or_before`` (<=), ``_at_or_after`` (>=). Filter names are
+        validated against the table's columns; an unknown name raises
+        ``ValidationError``. Passing ``None`` filters for SQL ``NULL``.
+        Multiple filters are combined with AND.
 
         Args:
-            where_clause: Optional SQL WHERE clause (without the ``WHERE`` keyword). Use ``?``
-                as placeholders for parameters. If omitted, all rows are returned.
+            where_clause: Optional raw SQL WHERE clause (without the ``WHERE``
+                keyword). Use ``?`` as placeholders for parameters. May be
+                combined with keyword filters (joined with AND, appended last
+                so trailing clauses like ``ORDER BY`` keep working).
             where_params: Optional parameter values for the WHERE clause placeholders. Must
                 match the number of ``?`` in where_clause.
+            **filters: Column-based filters validated against the model, e.g.
+                ``venue="GLBX"`` or ``expiry_before=date(2026, 1, 1)``.
 
         Returns:
             list[model_class]: A list of instantiated domain/ORM model objects created via
                 ``model_class.from_row``.
+
+        Raises:
+            ValidationError: If a keyword filter does not resolve to a column
+                of this table.
 
         Example:
             >>> from functools import partial
@@ -279,30 +334,53 @@ class Table:
             >>> len(all_foos)
             3
             >>>
-            >>> # Select with filter using parameterized query
-            >>> filtered = table.select("name = ?", ["apple"])
+            >>> # Select with a keyword filter (validated against the model)
+            >>> filtered = table.select(name="apple")
             >>> filtered[0].name
             'apple'
             >>>
-            >>> # Select with ORDER BY
+            >>> # Comparison suffixes for ranges
+            >>> early = table.select(id_before=3)
+            >>> sorted(f.name for f in early)
+            ['apple', 'banana']
+            >>>
+            >>> # Raw WHERE clause as the escape hatch (e.g. for ORDER BY)
             >>> ordered = table.select("id > ? ORDER BY name DESC", [0])
             >>> [f.name for f in ordered]
             ['cherry', 'banana', 'apple']
 
         Note:
-            Always use parameterized queries (``?`` placeholders) rather than string
-            concatenation to prevent SQL injection vulnerabilities.
+            Prefer keyword filters; they are validated against the model. When
+            using the raw form, always use parameterized queries (``?``
+            placeholders) rather than string concatenation to prevent SQL
+            injection vulnerabilities.
         """
-        where_clause = where_clause or "1 = 1"
-        where_params = where_params or []
+        conditions: list[str] = []
+        params: list[Any] = []
+
+        for name, value in filters.items():
+            column, op = self._resolve_filter(name)
+            if value is None and op == "=":
+                conditions.append(f"{column} IS NULL")
+            else:
+                conditions.append(f"{column} {op} ?")
+                params.append(value)
+
+        # Raw clause goes last (unparenthesized) so trailing SQL such as
+        # ORDER BY / LIMIT stays at the end of the statement.
+        if where_clause:
+            conditions.append(where_clause)
+            params.extend(where_params or [])
+
+        combined = " AND ".join(conditions) or "1 = 1"
 
         sql = f"""
         SELECT *
         FROM {self.table_name}
-        WHERE {where_clause}
+        WHERE {combined}
         """  # nosec B608  # noqa: S608
 
-        rows = self.connection.execute(sql, where_params).fetchall()
+        rows = self.connection.execute(sql, params).fetchall()
         return [self.model_class.from_row(row) for row in rows]
 
     def get_by(self, key: str, value: Any) -> Any:
