@@ -62,10 +62,8 @@ _default_db: ContextVar[object | None] = ContextVar("_default_db", default=None)
 def set_default_db(db: DB | object) -> None:
     """Permanently set the default DB for the current context (overwrite).
 
-    Parameters
-    ----------
-    db:
-        The Database instance to set as the default for this context.
+    Args:
+        db: The Database instance to set as the default for this context.
     """
     _default_db.set(db)
 
@@ -84,14 +82,10 @@ def get_default_db() -> DB | object:
     """Return the default DB for the current context.
 
     Returns:
-    -------
-    Database
-        The Database instance set for this context.
+        Database: The Database instance set for this context.
 
     Raises:
-    ------
-    RuntimeError:
-        If no default Database has been set for this context.
+        RuntimeError: If no default Database has been set for this context.
     """
     db = _default_db.get()
     if db is None:
@@ -109,14 +103,11 @@ def use_db(db: DB | object) -> Generator[None, None, None]:
     This is the preferred way to set a default Database in tests and examples,
     as it properly restores the previous value on exit.
 
-    Parameters
-    ----------
-    db:
-        The Database instance to use as the default within this context.
+    Args:
+        db: The Database instance to use as the default within this context.
 
     Yields:
-    ------
-    None
+        None
 
     """
     token = _default_db.set(db)

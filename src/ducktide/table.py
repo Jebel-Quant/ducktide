@@ -59,16 +59,12 @@ class Table:
     def __init__(self, connection: duckdb.DuckDBPyConnection, model_class: "type[ORMModel]", read_only: bool = False):
         """Initialize a generic Table helper.
 
-        Parameters
-        ----------
-        connection:
-            Active DuckDB connection used to execute queries.
-        model_class:
-            The ORM model class (e.g., ``ModelORM``) providing
-            ``_table_name``, ``_columns``, ``_primary_key``,
-            ``generate_create_table_sql()`` and ``from_row(...)``.
-        read_only:
-            If True, skip schema initialization.
+        Args:
+            connection: Active DuckDB connection used to execute queries.
+            model_class: The ORM model class (e.g., ``ModelORM``) providing
+                ``_table_name``, ``_columns``, ``_primary_key``,
+                ``generate_create_table_sql()`` and ``from_row(...)``.
+            read_only: If True, skip schema initialization.
         """
         self.connection = connection
         self.model_class = model_class
@@ -185,11 +181,9 @@ class Table:
         DuckDB's executemany() for batch processing. It's significantly faster
         than calling insert() in a loop for large datasets.
 
-        Parameters
-        ----------
-        objs:
-            An iterable of model instances whose attributes map to the
-            table's column order defined in ``self.columns``.
+        Args:
+            objs: An iterable of model instances whose attributes map to the
+                table's column order defined in ``self.columns``.
 
         Example:
             >>> from functools import partial
@@ -260,20 +254,15 @@ class Table:
         Query the table with optional filtering via SQL WHERE clauses. Always
         uses parameterized queries to prevent SQL injection.
 
-        Parameters
-        ----------
-        where_clause:
-            Optional SQL WHERE clause (without the ``WHERE`` keyword). Use ``?``
-            as placeholders for parameters. If omitted, all rows are returned.
-        where_params:
-            Optional parameter values for the WHERE clause placeholders. Must
-            match the number of ``?`` in where_clause.
+        Args:
+            where_clause: Optional SQL WHERE clause (without the ``WHERE`` keyword). Use ``?``
+                as placeholders for parameters. If omitted, all rows are returned.
+            where_params: Optional parameter values for the WHERE clause placeholders. Must
+                match the number of ``?`` in where_clause.
 
         Returns:
-        -------
-        list[model_class]
-            A list of instantiated domain/ORM model objects created via
-            ``model_class.from_row``.
+            list[model_class]: A list of instantiated domain/ORM model objects created via
+                ``model_class.from_row``.
 
         Example:
             >>> from functools import partial
@@ -301,9 +290,8 @@ class Table:
             ['cherry', 'banana', 'apple']
 
         Note:
-        ----
-        Always use parameterized queries (``?`` placeholders) rather than string
-        concatenation to prevent SQL injection vulnerabilities.
+            Always use parameterized queries (``?`` placeholders) rather than string
+            concatenation to prevent SQL injection vulnerabilities.
         """
         where_clause = where_clause or "1 = 1"
         where_params = where_params or []
@@ -392,20 +380,14 @@ class Table:
     def __getitem__(self, key: Any) -> Any:
         """Return a single row from the table by its primary key.
 
-        Parameters
-        ----------
-        key:
-            The primary key value of the row to retrieve.
+        Args:
+            key: The primary key value of the row to retrieve.
 
         Returns:
-        -------
-        Any
-            The model instance corresponding to the given primary key.
+            Any: The model instance corresponding to the given primary key.
 
         Raises:
-        ------
-        KeyError:
-            If no row is found for the given primary key.
+            KeyError: If no row is found for the given primary key.
         """
         result = self.select(f"{self.pk} = ?", [key])
         if len(result) == 0:
@@ -417,10 +399,8 @@ class Table:
         """Return the table as a Polars DataFrame.
 
         Returns:
-        -------
-        pl.DataFrame
-            A Polars DataFrame containing all rows from the table with
-            their column names preserved.
+            pl.DataFrame: A Polars DataFrame containing all rows from the table with
+                their column names preserved.
         """
         return self.connection.execute(f"SELECT * FROM {self.table_name}").pl()  # nosec B608  # noqa: S608
 
@@ -449,16 +429,11 @@ class Table:
     ) -> None:
         """Export the table to a CSV file using DuckDB's native writer.
 
-        Parameters
-        ----------
-        path:
-            Output CSV path.
-        delimiter:
-            Field delimiter (default: ',').
-        header:
-            Whether to include column headers.
-        overwrite:
-            Whether to overwrite an existing file.
+        Args:
+            path: Output CSV path.
+            delimiter: Field delimiter (default: ',').
+            header: Whether to include column headers.
+            overwrite: Whether to overwrite an existing file.
 
         Raises:
             FileExistsError: If the file exists and overwrite is False.
@@ -506,14 +481,10 @@ class Table:
     ) -> None:
         """Export the table to a Parquet file using DuckDB's native writer.
 
-        Parameters
-        ----------
-        path:
-            Output Parquet path.
-        compression:
-            Parquet compression codec (snappy, zstd, gzip, uncompressed).
-        overwrite:
-            Whether to overwrite an existing file.
+        Args:
+            path: Output Parquet path.
+            compression: Parquet compression codec (snappy, zstd, gzip, uncompressed).
+            overwrite: Whether to overwrite an existing file.
 
         Raises:
             FileExistsError: If the file exists and overwrite is False.
@@ -557,14 +528,10 @@ class Table:
 
         The CSV must match the table schema (column names & types).
 
-        Parameters
-        ----------
-        path:
-            Path to the CSV file.
-        delimiter:
-            Field delimiter character.
-        header:
-            Whether the CSV has a header row.
+        Args:
+            path: Path to the CSV file.
+            delimiter: Field delimiter character.
+            header: Whether the CSV has a header row.
 
         Returns:
             int: Number of rows imported.
@@ -609,10 +576,8 @@ class Table:
     def from_parquet(self, path: str | Path) -> int:
         """Load data from a Parquet file into the table and return imported row count.
 
-        Parameters
-        ----------
-        path:
-            Path to the Parquet file.
+        Args:
+            path: Path to the Parquet file.
 
         Returns:
             int: Number of rows imported.

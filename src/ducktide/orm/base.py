@@ -4,8 +4,8 @@ This module provides a lightweight object-relational mapping (ORM) system
 for interacting with databases using a DB-API 2.0 compatible interface
 (PEP 249), without external dependencies like SQLAlchemy or SQLModel.
 
-API Design
-----------
+## API Design
+
 This ORM follows the **Repository/Table Pattern** where all database operations
 are performed through table interfaces provided by the Database class.
 
