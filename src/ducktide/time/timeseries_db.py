@@ -17,6 +17,7 @@ The separation allows:
 3. Clean separation of concerns
 """
 
+import re
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
@@ -26,8 +27,11 @@ import duckdb
 import polars as pl
 from loguru import logger
 
-from jqr.database.exceptions import QueryError
+from jqr.database.exceptions import QueryError, ValidationError
 from jqr.database.utils.path_validation import escape_path_for_sql, validate_file_path
+
+# Valid SQL identifier for table and schema names (no quoting tricks, no injection).
+_IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 
 @dataclass
@@ -69,6 +73,26 @@ class TimeSeriesDB:
     # ------------------
     # Utility operations
     # ------------------
+    def _validate_table_name(self, table: str) -> str:
+        """Validate a table name, optionally schema-qualified as "schema.table".
+
+        Args:
+            table: The table name to validate.
+
+        Returns:
+            The validated table name, unchanged.
+
+        Raises:
+            ValidationError: If the table or schema name is not a valid SQL identifier.
+        """
+        parts = table.split(".")
+        if len(parts) > 2 or not all(_IDENTIFIER_RE.match(part) for part in parts):
+            raise ValidationError(  # noqa: TRY003
+                f"Invalid table name '{table}': expected an identifier matching "
+                f"[A-Za-z_][A-Za-z0-9_]*, optionally qualified as 'schema.table'"
+            )
+        return table
+
     def query(self, sql: str, *args: Any) -> pl.DataFrame:
         """Execute an arbitrary SQL query and return the result as a DataFrame.
 
@@ -129,8 +153,13 @@ class TimeSeriesDB:
 
         Returns:
             pl.DataFrame: A Polars DataFrame sorted by timestamp in ascending order.
-                If the table does not exist or an error occurs, an empty DataFrame
-                is returned.
+                If the table does not exist, an empty DataFrame is returned
+                (a missing table means "no data yet", not an error).
+
+        Raises:
+            ValidationError: If the table name is not a valid SQL identifier.
+            QueryError: If the query fails for any reason other than a missing
+                table (e.g., missing time column, type errors, corrupted data).
 
         Examples:
             >>> from jqr.database.time import TimeSeriesDB
@@ -153,10 +182,12 @@ class TimeSeriesDB:
             >>> df = ts_db.get_timeseries_frame("contract")
 
         Note:
-            This method gracefully handles errors by returning an empty DataFrame
-            rather than raising exceptions. This is intentional to support robust
-            data pipelines that can continue even when data is missing.
+            Only a missing table is treated as "no data" and yields an empty
+            DataFrame. All other failures raise QueryError so that callers can
+            distinguish genuine errors from absent data. Pipelines that prefer
+            graceful degradation should catch QueryError explicitly.
         """
+        self._validate_table_name(table)
         if table not in self.tables():
             return pl.DataFrame()
 
@@ -180,10 +211,10 @@ class TimeSeriesDB:
                     pass
 
         except Exception as exc:
-            # Graceful error handling: on any error (SQL, invalid params, or
-            # internal build errors), return an empty DataFrame.
-            logger.warning(f"Failed to query timeseries from '{table}': {exc}")
-            return pl.DataFrame()
+            # Anything beyond a missing table is a real failure: surface it as a
+            # typed error instead of masking it with an empty DataFrame.
+            logger.error(f"Failed to query timeseries from '{table}': {exc}")
+            raise QueryError(f"Failed to query timeseries from '{table}': {exc}") from exc  # noqa: TRY003
         else:
             return frame
 
@@ -300,6 +331,9 @@ class TimeSeriesDB:
             >>> # Ingest into schema-qualified table
             >>> ts_db.ingest("market_data.futures", df)
 
+        Raises:
+            ValidationError: If the table name is not a valid SQL identifier.
+
         Note:
             - The function uses the timestamp column specified during TimeSeriesDB
               initialization (default: "timestamp").
@@ -308,6 +342,8 @@ class TimeSeriesDB:
             - Table creation is automatic and uses DuckDB's schema inference from
               the Polars DataFrame.
         """
+        self._validate_table_name(table)
+
         # Ensure schema exists when provided
         if "." in table:
             schema, _ = table.split(".", 1)
@@ -390,8 +426,9 @@ class TimeSeriesDB:
 
         Raises:
             FileNotFoundError: If the CSV file doesn't exist.
-            ValidationError: If the path is invalid.
+            ValidationError: If the path or table name is invalid.
         """
+        self._validate_table_name(table)
         validated_path = validate_file_path(csv_path, must_exist=True)
         escaped_path = escape_path_for_sql(validated_path)
         table_q = self._quote_identifier(table)
@@ -412,8 +449,9 @@ class TimeSeriesDB:
 
         Raises:
             QueryError: If the table doesn't exist.
-            ValidationError: If the path is invalid.
+            ValidationError: If the path or table name is invalid.
         """
+        self._validate_table_name(table)
         if not self.has_table(table):
             raise QueryError(f"Table '{table}' does not exist")  # noqa: TRY003
 
@@ -431,8 +469,9 @@ class TimeSeriesDB:
 
         Raises:
             FileNotFoundError: If the Parquet file doesn't exist.
-            ValidationError: If the path is invalid.
+            ValidationError: If the path or table name is invalid.
         """
+        self._validate_table_name(table)
         validated_path = validate_file_path(pq_path, must_exist=True)
         escaped_path = escape_path_for_sql(validated_path)
         table_q = self._quote_identifier(table)
@@ -453,8 +492,9 @@ class TimeSeriesDB:
 
         Raises:
             QueryError: If the table doesn't exist.
-            ValidationError: If the path is invalid.
+            ValidationError: If the path or table name is invalid.
         """
+        self._validate_table_name(table)
         if not self.has_table(table):
             raise QueryError(f"Table '{table}' does not exist")  # noqa: TRY003
 

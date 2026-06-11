@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING, Any, cast
 import duckdb
 import polars as pl
 
-from .exceptions import DataError
+from .exceptions import DataError, QueryError, ValidationError
 from .utils.path_validation import escape_path_for_sql, validate_file_path
 
 if TYPE_CHECKING:
@@ -151,6 +151,10 @@ class Table:
             >>> len(table.select())
             2
 
+        Raises:
+            QueryError: If a database constraint (e.g., foreign key or primary key)
+                is violated.
+
         Note:
             When inserting multiple objects, consider using bulk_insert() directly
             for optimal performance with large datasets.
@@ -165,7 +169,10 @@ class Table:
             cols = ", ".join(self.columns)
             sql = f"INSERT INTO {self.table_name} ({cols}) VALUES ({placeholders})"  # nosec B608  # noqa: S608
 
-            self.connection.execute(sql, self._values_from_obj(obj))
+            try:
+                self.connection.execute(sql, self._values_from_obj(obj))
+            except duckdb.ConstraintException as exc:
+                raise QueryError(f"Constraint violation inserting into '{self.table_name}': {exc}") from exc  # noqa: TRY003
 
         else:
             # Multiple rows → delegate to bulk_insert
@@ -203,6 +210,10 @@ class Table:
             >>> len(table.select())
             100
 
+        Raises:
+            QueryError: If a database constraint (e.g., foreign key or primary key)
+                is violated.
+
         Performance:
             For inserting 1000+ records, bulk_insert() can be 10-100x faster
             than individual insert() calls due to reduced SQL parsing and
@@ -221,7 +232,10 @@ class Table:
         """  # nosec B608  # noqa: S608
 
         values = [self._values_from_obj(obj) for obj in objs]
-        self.connection.executemany(sql, values)
+        try:
+            self.connection.executemany(sql, values)
+        except duckdb.ConstraintException as exc:
+            raise QueryError(f"Constraint violation inserting into '{self.table_name}': {exc}") from exc  # noqa: TRY003
 
     def execute(self, query: str, params: Sequence[Any] | None = None) -> list[Any]:
         """Execute a SQL query against the underlying connection.
@@ -307,15 +321,22 @@ class Table:
         """Return a single row from the table by a given key.
 
         Args:
-            key: The column name to filter by.
+            key: The column name to filter by. Must be one of the table's columns.
             value: The value to match.
 
         Returns:
             The model instance matching the given key-value pair.
 
         Raises:
+            ValidationError: If key is not a column of this table.
             KeyError: If no row is found for the given key-value pair.
         """
+        # The column name is interpolated into SQL, so reject anything that is
+        # not a known column of this table before building the query.
+        if key not in self.columns:
+            raise ValidationError(  # noqa: TRY003
+                f"Unknown column '{key}' for table '{self.table_name}'. Valid columns: {', '.join(self.columns)}"
+            )
         result = self.select(f"{key} = ?", [value])
         return self._get_single_result(result, key, value)
 
