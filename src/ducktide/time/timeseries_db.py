@@ -55,7 +55,7 @@ class TimeSeriesDB:
         # df = foo.get_timeseries_frame(ts_db)
     """
 
-    def __init__(self, path: str | Path | None = None, time_col: str = "timestamp", read_only: bool = False):
+    def __init__(self, path: str | Path | None = None, time_col: str = "timestamp", read_only: bool = False) -> None:
         """Initialize a DuckDB-backed time series database.
 
         Args:

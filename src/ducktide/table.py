@@ -66,7 +66,9 @@ class Table:
         # table.to_csv("data.csv")
     """
 
-    def __init__(self, connection: duckdb.DuckDBPyConnection, model_class: "type[ORMModel]", read_only: bool = False):
+    def __init__(
+        self, connection: duckdb.DuckDBPyConnection, model_class: "type[ORMModel]", read_only: bool = False
+    ) -> None:
         """Initialize a generic Table helper.
 
         Args:
@@ -406,7 +408,7 @@ class Table:
         result = self.select(f"{key} = ?", [value])
         return self._get_single_result(result, key, value)
 
-    def get(self, id: int | None = None) -> Any:
+    def get(self, id: int | None = None) -> Any:  # noqa: A002 — public API: look up a row by its primary-key `id`
         """Return a single row from the table as a model instance.
 
         Args:

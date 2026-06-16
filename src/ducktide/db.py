@@ -41,7 +41,7 @@ class DB:
 
     def __init__(
         self, tables_map: Mapping[str, Callable[..., Any]], db_path: str | Path = ":memory:", read_only: bool = False
-    ):
+    ) -> None:
         """Initialize the DB with either in-memory or persistent storage.
 
         Args:
