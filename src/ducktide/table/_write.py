@@ -60,6 +60,9 @@ class WriteMixin(TableBase):
             obj = objs[0]
             placeholders = ", ".join("?" for _ in self.columns)
             cols = ", ".join(self.columns)
+            # Safe interpolation (B608): table_name and column names come from the ORM model
+            # class definition (code, not user data); row values are bound via
+            # placeholders below.
             sql = f"INSERT INTO {self.table_name} ({cols}) VALUES ({placeholders})"  # nosec B608  # noqa: S608
 
             try:
@@ -117,6 +120,8 @@ class WriteMixin(TableBase):
         placeholders = ", ".join("?" for _ in self.columns)
         cols = ", ".join(self.columns)
 
+        # Safe interpolation (B608): table_name and column names come from the ORM model class
+        # definition (code, not user data); row values are bound via placeholders.
         sql = f"""
         INSERT INTO {self.table_name} ({cols})
         VALUES ({placeholders})

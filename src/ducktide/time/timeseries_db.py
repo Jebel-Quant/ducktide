@@ -256,6 +256,10 @@ class TimeSeriesDB:
         # and produce simpler SQL strings (e.g., FROM schema.table).
         table_ref = table
 
+        # Safe interpolation (B608): table is validated by _validate_table_name (matched against
+        # _IDENTIFIER_RE) before this method is called, and time_col is the
+        # configured column name (code, not user data). All filter values
+        # (instrument_id, start, end) are bound via params.
         query = f"SELECT * FROM {table_ref} {where} ORDER BY {self.time_col} ASC"  # nosec B608  # noqa: S608
         return query, params
 
@@ -347,6 +351,9 @@ class TimeSeriesDB:
         # Ensure schema exists when provided
         if "." in table:
             schema, _ = table.split(".", 1)
+            # Safe interpolation (B608): table is validated by _validate_table_name above, and
+            # the schema part is further stripped of quote characters by
+            # _quote_unquoted; not user data.
             self.con.execute(f"CREATE SCHEMA IF NOT EXISTS {self._quote_unquoted(schema)}")  # nosec B608
 
         # Create table if missing
@@ -354,6 +361,9 @@ class TimeSeriesDB:
             # register and create table from Polars df
             self.con.register("temp_ingest", frame)
             quoted_table = self._quote_identifier(table)
+            # Safe interpolation (B608): table is validated by _validate_table_name above and
+            # quoted_table is produced by _quote_identifier; data rows come from
+            # the registered temp_ingest relation, not string interpolation.
             self.con.execute(f"CREATE TABLE {quoted_table} AS SELECT * FROM temp_ingest")  # nosec B608  # noqa: S608
             self.con.unregister("temp_ingest")
             return
@@ -368,6 +378,9 @@ class TimeSeriesDB:
             logger.info(f"Ingesting {len(frame)} rows into '{table}'...")
 
             # 1. Get existing max timestamps per instrument
+            # Safe interpolation (B608): quoted_table is produced by _quote_identifier from a
+            # name already validated by _validate_table_name, and time_col is the
+            # configured column name; no user data is interpolated.
             sql = f"""
                 SELECT instrument_id, MAX({self.time_col}) as max_ts
                 FROM {quoted_table}
@@ -397,6 +410,9 @@ class TimeSeriesDB:
                 logger.info(f"No new rows to append to '{table}'.")
         else:
             # No instrument_id: global max timestamp
+            # Safe interpolation (B608): quoted_table is _quote_identifier output from a
+            # validated name and time_col is the configured column name; the
+            # '1970-01-01' epoch is a fixed literal constant, not user data.
             result = self.con.execute(
                 f"SELECT COALESCE(MAX({self.time_col}),'1970-01-01') FROM {quoted_table}"  # nosec B608  # noqa: S608
             ).fetchone()
@@ -414,6 +430,9 @@ class TimeSeriesDB:
         """
         quoted_table = self._quote_identifier(table)
         self.con.register("temp", df)
+        # Safe interpolation (B608): quoted_table is _quote_identifier output from a validated
+        # name; data rows come from the registered temp relation, not from string
+        # interpolation.
         self.con.execute(f"INSERT INTO {quoted_table} SELECT * FROM temp")  # nosec B608  # noqa: S608
         self.con.unregister("temp")
 
@@ -432,7 +451,11 @@ class TimeSeriesDB:
         validated_path = validate_file_path(csv_path, must_exist=True)
         escaped_path = escape_path_for_sql(validated_path)
         table_q = self._quote_identifier(table)
+        # Safe interpolation (B608): table_q is _quote_identifier output from a name validated by
+        # _validate_table_name; not user data.
         self.con.execute(f"DROP TABLE IF EXISTS {table_q}")  # nosec B608
+        # Safe interpolation (B608): table_q is validated/quoted as above and escaped_path is
+        # sanitized via escape_path_for_sql.
         self.con.execute(
             f"""
             CREATE TABLE {table_q} AS
@@ -458,6 +481,9 @@ class TimeSeriesDB:
         validated_path = validate_file_path(csv_path)
         escaped_path = escape_path_for_sql(validated_path)
         table_q = self._quote_identifier(table)
+        # Safe interpolation (B608): table_q is _quote_identifier output from a validated name,
+        # escaped_path is sanitized via escape_path_for_sql, and HEADER/DELIMITER
+        # are literal COPY options, not user data.
         self.con.execute(f"COPY (SELECT * FROM {table_q}) TO '{escaped_path}' (HEADER, DELIMITER ',')")  # nosec B608  # noqa: S608
 
     def import_parquet(self, pq_path: str | Path, table: str) -> None:
@@ -475,7 +501,11 @@ class TimeSeriesDB:
         validated_path = validate_file_path(pq_path, must_exist=True)
         escaped_path = escape_path_for_sql(validated_path)
         table_q = self._quote_identifier(table)
+        # Safe interpolation (B608): table_q is _quote_identifier output from a name validated by
+        # _validate_table_name; not user data.
         self.con.execute(f"DROP TABLE IF EXISTS {table_q}")  # nosec B608
+        # Safe interpolation (B608): table_q is validated/quoted as above and escaped_path is
+        # sanitized via escape_path_for_sql.
         self.con.execute(
             f"""
             CREATE TABLE {table_q} AS
@@ -501,6 +531,9 @@ class TimeSeriesDB:
         validated_path = validate_file_path(pq_path)
         escaped_path = escape_path_for_sql(validated_path)
         table_q = self._quote_identifier(table)
+        # Safe interpolation (B608): table_q is _quote_identifier output from a validated name,
+        # escaped_path is sanitized via escape_path_for_sql, and FORMAT 'PARQUET'
+        # is a literal COPY option, not user data.
         self.con.execute(
             f"""
             COPY (SELECT * FROM {table_q})

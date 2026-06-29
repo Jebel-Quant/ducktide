@@ -26,6 +26,8 @@ class IOMixin(TableBase):
             pl.DataFrame: A Polars DataFrame containing all rows from the table with
                 their column names preserved.
         """
+        # Safe interpolation (B608): table_name comes from the ORM model class definition (code,
+        # not user data); no data values are interpolated.
         return self.connection.execute(f"SELECT * FROM {self.table_name}").pl()  # nosec B608  # noqa: S608
 
     def _get_date_columns(self) -> set[str]:
@@ -85,6 +87,9 @@ class IOMixin(TableBase):
             else:
                 select_cols.append(col)
 
+        # Safe interpolation (B608): table_name and column names come from the ORM model class
+        # definition; escaped_path is sanitized via escape_path_for_sql; the COPY
+        # options are literal SQL keywords, not bindable parameters in DuckDB.
         sql = f"""
         COPY (
             SELECT {", ".join(select_cols)}
@@ -130,6 +135,9 @@ class IOMixin(TableBase):
             else:
                 select_cols.append(col)
 
+        # Safe interpolation (B608): table_name and column names come from the ORM model class
+        # definition; escaped_path is sanitized via escape_path_for_sql; FORMAT
+        # and COMPRESSION are literal COPY options, not bindable parameters.
         sql = f"""
         COPY (
             SELECT {", ".join(select_cols)}
@@ -174,6 +182,8 @@ class IOMixin(TableBase):
         ]
 
         # Count rows first (for return value), then insert
+        # Safe interpolation (B608): escaped_path is sanitized via escape_path_for_sql and the
+        # read_csv_auto options are literal SQL keywords, not bindable parameters.
         count_sql = f"""
         SELECT COUNT(*)
         FROM read_csv_auto(
@@ -185,6 +195,9 @@ class IOMixin(TableBase):
         result = self.connection.execute(count_sql).fetchone()
         row_count = int(result[0]) if result else 0
 
+        # Safe interpolation (B608): table_name comes from the ORM model class definition;
+        # escaped_path is sanitized via escape_path_for_sql; read_csv_auto options
+        # are literal SQL keywords, not bindable parameters.
         _sql = f"""
         INSERT INTO {self.table_name}
         SELECT *
@@ -214,6 +227,8 @@ class IOMixin(TableBase):
         escaped_path = escape_path_for_sql(validated_path)
 
         # Count rows first for return value
+        # Safe interpolation (B608): escaped_path is sanitized via escape_path_for_sql; no data
+        # values are interpolated.
         count_sql = f"""
         SELECT COUNT(*)
         FROM read_parquet('{escaped_path}')
@@ -222,6 +237,8 @@ class IOMixin(TableBase):
         result = self.connection.execute(count_sql).fetchone()
         row_count = int(result[0]) if result else 0
 
+        # Safe interpolation (B608): table_name comes from the ORM model class definition;
+        # escaped_path is sanitized via escape_path_for_sql.
         insert_sql = f"""
         INSERT INTO {self.table_name}
         SELECT *

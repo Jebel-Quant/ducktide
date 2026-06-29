@@ -147,6 +147,10 @@ class QueryMixin(TableBase):
 
         combined = " AND ".join(conditions) or "1 = 1"
 
+        # Safe interpolation (B608): table_name is from the ORM model class definition; filter
+        # column names and operators come from _resolve_filter (validated against
+        # self.columns), and any raw where_clause is a caller-supplied SQL
+        # fragment by contract. All data values are bound via params below.
         sql = f"""
         SELECT *
         FROM {self.table_name}
@@ -210,6 +214,8 @@ class QueryMixin(TableBase):
         """Return True if the table is empty, False otherwise."""
         if not self.exists:
             return True
+        # Safe interpolation (B608): table_name comes from the ORM model class definition (code,
+        # not user data); no data values are interpolated.
         result = self.connection.execute(f"SELECT COUNT(*) FROM {self.table_name}").fetchone()  # nosec B608  # noqa: S608
         return bool(result is None or result[0] == 0)
 
@@ -217,6 +223,8 @@ class QueryMixin(TableBase):
         """Return the number of rows in the table."""
         if not self.exists:
             return 0
+        # Safe interpolation (B608): table_name comes from the ORM model class definition (code,
+        # not user data); no data values are interpolated.
         result = self.connection.execute(f"SELECT COUNT(*) FROM {self.table_name}").fetchone()  # nosec B608  # noqa: S608
         return int(result[0]) if result else 0
 
