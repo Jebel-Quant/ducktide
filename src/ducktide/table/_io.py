@@ -12,6 +12,7 @@ from typing import cast
 
 import polars as pl
 
+from ..utils import sql
 from ..utils.path_validation import escape_path_for_sql, validate_file_path
 from ._base import TableBase
 
@@ -26,9 +27,7 @@ class IOMixin(TableBase):
             pl.DataFrame: A Polars DataFrame containing all rows from the table with
                 their column names preserved.
         """
-        # Safe interpolation (B608): table_name comes from the ORM model class definition (code,
-        # not user data); no data values are interpolated.
-        return self.connection.execute(f"SELECT * FROM {self.table_name}").pl()  # nosec B608  # noqa: S608
+        return self.connection.execute(sql.select_all(self.table_name)).pl()
 
     def _get_date_columns(self) -> set[str]:
         """Return the set of date columns that need special handling.
@@ -87,19 +86,12 @@ class IOMixin(TableBase):
             else:
                 select_cols.append(col)
 
-        # Safe interpolation (B608): table_name and column names come from the ORM model class
-        # definition; escaped_path is sanitized via escape_path_for_sql; the COPY
-        # options are literal SQL keywords, not bindable parameters in DuckDB.
-        sql = f"""
-        COPY (
-            SELECT {", ".join(select_cols)}
-            FROM {self.table_name}
-        )
-        TO '{escaped_path}'
-        ({", ".join(options)})
-        """  # nosec B608  # noqa: S608
+        # table_name and column names come from the ORM model class definition;
+        # escaped_path is sanitized via escape_path_for_sql; the COPY options are
+        # literal SQL keywords, not bindable parameters in DuckDB.
+        statement = sql.copy_select_to(", ".join(select_cols), self.table_name, escaped_path, ", ".join(options))
 
-        self.connection.execute(sql)
+        self.connection.execute(statement)
 
     def to_parquet(
         self,
@@ -135,19 +127,13 @@ class IOMixin(TableBase):
             else:
                 select_cols.append(col)
 
-        # Safe interpolation (B608): table_name and column names come from the ORM model class
-        # definition; escaped_path is sanitized via escape_path_for_sql; FORMAT
-        # and COMPRESSION are literal COPY options, not bindable parameters.
-        sql = f"""
-        COPY (
-            SELECT {", ".join(select_cols)}
-            FROM {self.table_name}
-        )
-        TO '{escaped_path}'
-        (FORMAT PARQUET, COMPRESSION '{compression}')
-        """  # nosec B608  # noqa: S608
+        # table_name and column names come from the ORM model class definition;
+        # escaped_path is sanitized via escape_path_for_sql; FORMAT and
+        # COMPRESSION are literal COPY options, not bindable parameters.
+        options = f"FORMAT PARQUET, COMPRESSION '{compression}'"
+        statement = sql.copy_select_to(", ".join(select_cols), self.table_name, escaped_path, options)
 
-        self.connection.execute(sql)
+        self.connection.execute(statement)
 
     def from_csv(
         self,
@@ -175,39 +161,17 @@ class IOMixin(TableBase):
         validated_path = validate_file_path(path, must_exist=True)
         escaped_path = escape_path_for_sql(validated_path)
 
-        # read_csv_auto options require KEY=VALUE form
-        options = [
-            f"DELIM='{delimiter}'",
-            f"HEADER={str(header).upper()}",
-        ]
+        # read_csv_auto options require KEY=VALUE form. escaped_path is sanitized
+        # via escape_path_for_sql; the options are literal SQL keywords and
+        # table_name comes from the ORM model class definition.
+        options = ", ".join([f"DELIM='{delimiter}'", f"HEADER={str(header).upper()}"])
+        reader = sql.read_csv_expr(escaped_path, options)
 
-        # Count rows first (for return value), then insert
-        # Safe interpolation (B608): escaped_path is sanitized via escape_path_for_sql and the
-        # read_csv_auto options are literal SQL keywords, not bindable parameters.
-        count_sql = f"""
-        SELECT COUNT(*)
-        FROM read_csv_auto(
-            '{escaped_path}',
-            {", ".join(options)}
-        )
-        """  # nosec B608  # noqa: S608
-
-        result = self.connection.execute(count_sql).fetchone()
+        # Count rows first (for return value), then insert.
+        result = self.connection.execute(sql.count_all(reader)).fetchone()
         row_count = int(result[0]) if result else 0
 
-        # Safe interpolation (B608): table_name comes from the ORM model class definition;
-        # escaped_path is sanitized via escape_path_for_sql; read_csv_auto options
-        # are literal SQL keywords, not bindable parameters.
-        _sql = f"""
-        INSERT INTO {self.table_name}
-        SELECT *
-        FROM read_csv_auto(
-            '{escaped_path}',
-            {", ".join(options)}
-        )
-        """  # nosec B608  # noqa: S608
-
-        self.connection.execute(_sql)
+        self.connection.execute(sql.insert_from_query(self.table_name, sql.select_all(reader)))
         return row_count
 
     def from_parquet(self, path: str | Path) -> int:
@@ -226,24 +190,13 @@ class IOMixin(TableBase):
         validated_path = validate_file_path(path, must_exist=True)
         escaped_path = escape_path_for_sql(validated_path)
 
-        # Count rows first for return value
-        # Safe interpolation (B608): escaped_path is sanitized via escape_path_for_sql; no data
-        # values are interpolated.
-        count_sql = f"""
-        SELECT COUNT(*)
-        FROM read_parquet('{escaped_path}')
-        """  # nosec B608  # noqa: S608
+        # escaped_path is sanitized via escape_path_for_sql; table_name comes from
+        # the ORM model class definition.
+        reader = sql.read_parquet_expr(escaped_path)
 
-        result = self.connection.execute(count_sql).fetchone()
+        # Count rows first for return value, then insert.
+        result = self.connection.execute(sql.count_all(reader)).fetchone()
         row_count = int(result[0]) if result else 0
 
-        # Safe interpolation (B608): table_name comes from the ORM model class definition;
-        # escaped_path is sanitized via escape_path_for_sql.
-        insert_sql = f"""
-        INSERT INTO {self.table_name}
-        SELECT *
-        FROM read_parquet('{escaped_path}')
-        """  # nosec B608  # noqa: S608
-
-        self.connection.execute(insert_sql)
+        self.connection.execute(sql.insert_from_query(self.table_name, sql.select_all(reader)))
         return row_count

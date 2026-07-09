@@ -11,6 +11,7 @@ from collections.abc import Iterator, Sequence
 from typing import Any
 
 from ..exceptions import ValidationError
+from ..utils import sql
 from ._base import TableBase
 
 # Suffixes recognized by the keyword filter API, mapped to SQL comparison
@@ -147,17 +148,13 @@ class QueryMixin(TableBase):
 
         combined = " AND ".join(conditions) or "1 = 1"
 
-        # Safe interpolation (B608): table_name is from the ORM model class definition; filter
-        # column names and operators come from _resolve_filter (validated against
+        # table_name is from the ORM model class definition; filter column names
+        # and operators come from _resolve_filter (validated against
         # self.columns), and any raw where_clause is a caller-supplied SQL
         # fragment by contract. All data values are bound via params below.
-        sql = f"""
-        SELECT *
-        FROM {self.table_name}
-        WHERE {combined}
-        """  # nosec B608  # noqa: S608
+        statement = sql.select_ordered(self.table_name, where=combined)
 
-        rows = self.connection.execute(sql, params).fetchall()
+        rows = self.connection.execute(statement, params).fetchall()
         return [self.model_class.from_row(row) for row in rows]
 
     def get_by(self, key: str, value: Any) -> Any:
@@ -214,18 +211,14 @@ class QueryMixin(TableBase):
         """Return True if the table is empty, False otherwise."""
         if not self.exists:
             return True
-        # Safe interpolation (B608): table_name comes from the ORM model class definition (code,
-        # not user data); no data values are interpolated.
-        result = self.connection.execute(f"SELECT COUNT(*) FROM {self.table_name}").fetchone()  # nosec B608  # noqa: S608
+        result = self.connection.execute(sql.count_all(self.table_name)).fetchone()
         return bool(result is None or result[0] == 0)
 
     def __len__(self) -> int:
         """Return the number of rows in the table."""
         if not self.exists:
             return 0
-        # Safe interpolation (B608): table_name comes from the ORM model class definition (code,
-        # not user data); no data values are interpolated.
-        result = self.connection.execute(f"SELECT COUNT(*) FROM {self.table_name}").fetchone()  # nosec B608  # noqa: S608
+        result = self.connection.execute(sql.count_all(self.table_name)).fetchone()
         return int(result[0]) if result else 0
 
     def __bool__(self) -> bool:

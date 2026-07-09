@@ -11,6 +11,7 @@ from typing import Any
 import duckdb
 
 from ..exceptions import QueryError
+from ..utils import sql
 from ._base import TableBase
 
 
@@ -60,13 +61,12 @@ class WriteMixin(TableBase):
             obj = objs[0]
             placeholders = ", ".join("?" for _ in self.columns)
             cols = ", ".join(self.columns)
-            # Safe interpolation (B608): table_name and column names come from the ORM model
-            # class definition (code, not user data); row values are bound via
-            # placeholders below.
-            sql = f"INSERT INTO {self.table_name} ({cols}) VALUES ({placeholders})"  # nosec B608  # noqa: S608
+            # table_name and column names come from the ORM model class definition
+            # (code, not user data); row values are bound via placeholders below.
+            statement = sql.insert_row(self.table_name, cols, placeholders)
 
             try:
-                self.connection.execute(sql, self._values_from_obj(obj))
+                self.connection.execute(statement, self._values_from_obj(obj))
             except duckdb.ConstraintException as exc:
                 raise QueryError(f"Constraint violation inserting into '{self.table_name}': {exc}") from exc  # noqa: TRY003
 
@@ -120,15 +120,12 @@ class WriteMixin(TableBase):
         placeholders = ", ".join("?" for _ in self.columns)
         cols = ", ".join(self.columns)
 
-        # Safe interpolation (B608): table_name and column names come from the ORM model class
-        # definition (code, not user data); row values are bound via placeholders.
-        sql = f"""
-        INSERT INTO {self.table_name} ({cols})
-        VALUES ({placeholders})
-        """  # nosec B608  # noqa: S608
+        # table_name and column names come from the ORM model class definition
+        # (code, not user data); row values are bound via placeholders.
+        statement = sql.insert_row(self.table_name, cols, placeholders)
 
         values = [self._values_from_obj(obj) for obj in objs]
         try:
-            self.connection.executemany(sql, values)
+            self.connection.executemany(statement, values)
         except duckdb.ConstraintException as exc:
             raise QueryError(f"Constraint violation inserting into '{self.table_name}': {exc}") from exc  # noqa: TRY003

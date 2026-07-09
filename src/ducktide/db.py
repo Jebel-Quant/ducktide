@@ -13,6 +13,8 @@ from typing import Any, Self
 
 import duckdb
 
+from jqr.database.utils import sql
+
 
 class DB:
     """Generic DuckDB database wrapper.
@@ -197,9 +199,8 @@ class DB:
         """
         tables = self.connection.execute("SHOW TABLES").fetchall()
         for (table_name,) in tables:
-            # Safe interpolation (B608): table_name is an identifier from the DuckDB catalog
-            # (SHOW TABLES), never user input; safe to interpolate.
-            self.connection.execute(f"DROP TABLE IF EXISTS {table_name}")  # nosec B608
+            # table_name is a catalog identifier from SHOW TABLES, never user input.
+            self.connection.execute(sql.drop_table_if_exists(table_name))
 
     def __enter__(self) -> Self:
         """Enter the runtime context for the DB object.
