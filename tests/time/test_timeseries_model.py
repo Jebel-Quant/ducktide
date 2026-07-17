@@ -2,19 +2,25 @@
 
 This module contains tests for the TimeSeriesModel abstract base class,
 which provides time series data access functionality to domain models.
+
+These tests exercise the model against a real in-memory
+:class:`~jqr.database.time.TimeSeriesDB` (the concrete
+:class:`~jqr.database.time.timeseries_repo.TimeSeriesRepository`) and assert on
+observable behaviour — the frames returned and the rows persisted — rather than
+on the internal sequence of repository calls. The model's own guard clauses
+(missing ``instrument_id`` / ``table_name``) are exercised directly.
 """
 
-from datetime import date
+from datetime import UTC, date, datetime
 from typing import ClassVar
-from unittest.mock import MagicMock
 
 import polars as pl
 import pytest
 
 from jqr.database.exceptions import ValidationError
 from jqr.database.orm.base import DomainModel
+from jqr.database.time import TimeSeriesDB
 from jqr.database.time.timeseries_model import TimeSeriesModel
-from jqr.database.time.timeseries_repo import TimeSeriesRepository
 
 
 # Create a concrete implementation of TimeSeriesModel for testing
@@ -34,6 +40,30 @@ class MockTimeSeriesModel(DomainModel, TimeSeriesModel):
         return self.id
 
 
+@pytest.fixture
+def repo() -> TimeSeriesDB:
+    """Return a real, empty in-memory time series repository.
+
+    Returns:
+        An in-memory :class:`~jqr.database.time.TimeSeriesDB` instance.
+    """
+    return TimeSeriesDB()
+
+
+def _seed(repo: TimeSeriesDB, rows: list[dict]) -> None:
+    """Persist rows directly into the repository, bypassing the model.
+
+    Lets the query tests assert on data they seeded without depending on the
+    model's ingest transformation (which has its own tests).
+
+    Args:
+        repo: The repository to seed.
+        rows: Row dicts, each with ``timestamp`` (aware datetime),
+            ``instrument_id`` and ``value``.
+    """
+    repo.ingest("test_table", pl.DataFrame(rows))
+
+
 class TestTimeSeriesModel:
     """Tests for the TimeSeriesModel abstract base class."""
 
@@ -46,61 +76,41 @@ class TestTimeSeriesModel:
         assert model.table_name == "test_table"
         assert model.instrument_id == 42
 
-    def test_get_timeseries_frame(self):
-        """Test the get_timeseries_frame method."""
-        # Create a mock repository
-        mock_repo = MagicMock(spec=TimeSeriesRepository)
-
-        # Create test data
-        test_data = pl.DataFrame({"timestamp": [date(2025, 1, 1), date(2025, 1, 2)], "value": [100.0, 101.0]})
-
-        # Configure the mock to return test data
-        mock_repo.get_timeseries_frame.return_value = test_data
-
-        # Create a model instance
-        model = MockTimeSeriesModel(id=42)
-
-        # Test with default parameters
-        result = model.get_timeseries_frame(mock_repo)
-
-        # Verify the repository was called with correct parameters
-        # Note: 'every' is handled locally in the model, not passed to repo
-        mock_repo.get_timeseries_frame.assert_called_once_with(
-            table="test_table", instrument_id=42, start=None, end=None, timezone=None
+    def test_get_timeseries_frame(self, repo: TimeSeriesDB):
+        """Model returns the persisted rows for its own instrument only."""
+        _seed(
+            repo,
+            [
+                {"timestamp": datetime(2025, 1, 1, tzinfo=UTC), "instrument_id": 42, "value": 100.0},
+                {"timestamp": datetime(2025, 1, 2, tzinfo=UTC), "instrument_id": 42, "value": 101.0},
+                # A different instrument that must not leak into the result.
+                {"timestamp": datetime(2025, 1, 1, tzinfo=UTC), "instrument_id": 99, "value": 999.0},
+            ],
         )
 
-        # Verify the result
-        assert result is test_data
+        result = MockTimeSeriesModel(id=42).get_timeseries_frame(repo)
 
-    def test_get_timeseries_frame_with_date_range(self):
-        """Test the get_timeseries_frame method with date range parameters."""
-        # Create a mock repository
-        mock_repo = MagicMock(spec=TimeSeriesRepository)
+        assert result.height == 2
+        assert result["instrument_id"].unique().to_list() == [42]
+        assert sorted(result["value"].to_list()) == [100.0, 101.0]
 
-        # Create test data
-        test_data = pl.DataFrame({"timestamp": [date(2025, 1, 1), date(2025, 1, 2)], "value": [100.0, 101.0]})
-
-        # Configure the mock to return test data
-        mock_repo.get_timeseries_frame.return_value = test_data
-
-        # Create a model instance
-        model = MockTimeSeriesModel(id=42)
-
-        # Test with date range
-        start_date = date(2025, 1, 1)
-        end_date = date(2025, 1, 31)
-
-        result = model.get_timeseries_frame(mock_repo, start=start_date, end=end_date)
-
-        # Verify the repository was called with correct parameters
-        mock_repo.get_timeseries_frame.assert_called_once_with(
-            table="test_table", instrument_id=42, start=start_date, end=end_date, timezone=None
+    def test_get_timeseries_frame_with_date_range(self, repo: TimeSeriesDB):
+        """A start/end range restricts the returned rows to that window."""
+        _seed(
+            repo,
+            [
+                {"timestamp": datetime(2025, 1, 1, tzinfo=UTC), "instrument_id": 42, "value": 1.0},
+                {"timestamp": datetime(2025, 1, 15, tzinfo=UTC), "instrument_id": 42, "value": 2.0},
+                {"timestamp": datetime(2025, 2, 10, tzinfo=UTC), "instrument_id": 42, "value": 3.0},
+            ],
         )
 
-        # Verify the result
-        assert result is test_data
+        result = MockTimeSeriesModel(id=42).get_timeseries_frame(repo, start=date(2025, 1, 1), end=date(2025, 1, 31))
 
-    def test_get_timeseries_frame_missing_instrument_id(self):
+        # Only the two January rows fall inside the window.
+        assert sorted(result["value"].to_list()) == [1.0, 2.0]
+
+    def test_get_timeseries_frame_missing_instrument_id(self, repo: TimeSeriesDB):
         """Test get_timeseries_frame when instrument_id is None."""
 
         class IncompleteModel(TimeSeriesModel):
@@ -116,13 +126,10 @@ class TestTimeSeriesModel:
                 """Return the time series table name."""
                 return "test"
 
-        model = IncompleteModel()
-        mock_repo = MagicMock(spec=TimeSeriesRepository)
-
         with pytest.raises(ValidationError, match="instrument_id is not set"):
-            model.get_timeseries_frame(mock_repo)
+            IncompleteModel().get_timeseries_frame(repo)
 
-    def test_get_timeseries_frame_missing_table_name(self):
+    def test_get_timeseries_frame_missing_table_name(self, repo: TimeSeriesDB):
         """Test get_timeseries_frame when table_name is not defined."""
 
         class NoTableNameModel(TimeSeriesModel):
@@ -133,11 +140,8 @@ class TestTimeSeriesModel:
                 """Return the instrument id."""
                 return 1
 
-        model = NoTableNameModel()
-        mock_repo = MagicMock(spec=TimeSeriesRepository)
-
         with pytest.raises(AttributeError, match="NoTableNameModel must define table_name"):
-            model.get_timeseries_frame(mock_repo)
+            NoTableNameModel().get_timeseries_frame(repo)
 
     def test_table_name_attribute_error(self):
         """Test table_name property raises AttributeError if not defined."""
@@ -171,33 +175,29 @@ class TestTimeSeriesModel:
         # Note: this might not even call the property if overridden by class attribute
         assert model.table_name == "explicit_table"
 
-    def test_ingest(self):
-        """Test the ingest method of TimeSeriesModel."""
-        # Create a mock repository
-        mock_repo = MagicMock(spec=TimeSeriesRepository)
+    def test_ingest(self, repo: TimeSeriesDB):
+        """Ingesting through the model persists a row keyed by instrument_id.
 
-        # Create a model instance
+        The model is expected to parse ``ts_event`` into a ``timestamp`` column
+        and stamp the frame with its ``instrument_id`` before handing it to the
+        repository; here we assert on what actually landed in storage.
+        """
         model = MockTimeSeriesModel(id=42)
 
-        # Create test data without instrument_id, using 'ts_event' as expected by ingest
-        test_data = pl.DataFrame({"ts_event": ["2025-01-01T09:00:00.000000+0000"], "value": [100.0]})
+        # ts_event drives the model's timestamp parsing; no instrument_id yet.
+        model.ingest(repo, pl.DataFrame({"ts_event": ["2025-01-01T09:00:00.000000+0000"], "value": [100.0]}))
 
-        # Test ingestion
-        model.ingest(mock_repo, test_data)
+        # Read the row back out of the real repository.
+        stored = repo.get_timeseries_frame("test_table", instrument_id=42, start=None, end=None)
 
-        # Verify the repository was called
-        # The frame passed to repo.ingest should have instrument_id=42 added
-        assert mock_repo.ingest.call_count == 1
-        call_args = mock_repo.ingest.call_args
-        assert call_args.kwargs["table"] == "test_table"
-        ingested_frame = call_args.kwargs["frame"]
+        assert stored.height == 1
+        assert stored["instrument_id"][0] == 42
+        assert stored["value"][0] == 100.0
+        # The model added a proper datetime timestamp column.
+        assert "timestamp" in stored.columns
+        assert isinstance(stored.schema["timestamp"], pl.Datetime)
 
-        assert "instrument_id" in ingested_frame.columns
-        assert ingested_frame["instrument_id"][0] == 42
-        assert "timestamp" in ingested_frame.columns
-        assert ingested_frame["value"][0] == 100.0
-
-    def test_ingest_missing_instrument_id(self):
+    def test_ingest_missing_instrument_id(self, repo: TimeSeriesDB):
         """Test ingest when instrument_id is None."""
 
         class IncompleteModel(TimeSeriesModel):
@@ -213,14 +213,12 @@ class TestTimeSeriesModel:
                 """Return the time series table name."""
                 return "test"
 
-        model = IncompleteModel()
-        mock_repo = MagicMock(spec=TimeSeriesRepository)
         test_data = pl.DataFrame({"ts_event": ["2025-01-01T09:00:00.000000+0000"]})
 
         with pytest.raises(ValidationError, match="instrument_id is not set"):
-            model.ingest(mock_repo, test_data)
+            IncompleteModel().ingest(repo, test_data)
 
-    def test_ingest_missing_table_name(self):
+    def test_ingest_missing_table_name(self, repo: TimeSeriesDB):
         """Test ingest when table_name is not defined."""
 
         class NoTableNameModel(TimeSeriesModel):
@@ -231,56 +229,42 @@ class TestTimeSeriesModel:
                 """Return the instrument id."""
                 return 1
 
-        model = NoTableNameModel()
-        mock_repo = MagicMock(spec=TimeSeriesRepository)
         test_data = pl.DataFrame({"ts_event": ["2025-01-01T09:00:00.000000+0000"]})
 
         with pytest.raises(AttributeError, match="NoTableNameModel must define table_name"):
-            model.ingest(mock_repo, test_data)
+            NoTableNameModel().ingest(repo, test_data)
 
-    def test_get_timeseries_frame_with_every_resampling(self):
-        """Test get_timeseries_frame with the 'every' resampling parameter."""
-        from datetime import datetime
-
-        # Create a mock repository
-        mock_repo = MagicMock(spec=TimeSeriesRepository)
-
-        # Create test OHLCV data with datetime for group_by_dynamic
-        test_data = pl.DataFrame(
-            {
-                "timestamp": [
-                    datetime(2025, 1, 1, 9, 0),
-                    datetime(2025, 1, 1, 9, 30),
-                    datetime(2025, 1, 1, 10, 0),
-                    datetime(2025, 1, 1, 10, 30),
-                ],
-                "open": [100.0, 101.0, 102.0, 103.0],
-                "high": [101.0, 102.0, 103.0, 104.0],
-                "low": [99.0, 100.0, 101.0, 102.0],
-                "close": [100.5, 101.5, 102.5, 103.5],
-                "volume": [1000, 1100, 1200, 1300],
-            }
+    def test_get_timeseries_frame_with_every_resampling(self, repo: TimeSeriesDB):
+        """The 'every' parameter resamples the returned frame with OHLCV aggregation."""
+        # Four 30-minute OHLCV bars spanning two whole hours.
+        _seed(
+            repo,
+            [
+                {
+                    "timestamp": datetime(2025, 1, 1, hour, minute, tzinfo=UTC),
+                    "instrument_id": 42,
+                    "open": o,
+                    "high": h,
+                    "low": low,
+                    "close": c,
+                    "volume": v,
+                }
+                for (hour, minute, o, h, low, c, v) in [
+                    (9, 0, 100.0, 101.0, 99.0, 100.5, 1000),
+                    (9, 30, 101.0, 102.0, 100.0, 101.5, 1100),
+                    (10, 0, 102.0, 103.0, 101.0, 102.5, 1200),
+                    (10, 30, 103.0, 104.0, 102.0, 103.5, 1300),
+                ]
+            ],
         )
 
-        # Configure the mock to return test data
-        mock_repo.get_timeseries_frame.return_value = test_data
+        result = MockTimeSeriesModel(id=42).get_timeseries_frame(repo, every="1h").sort("timestamp")
 
-        # Create a model instance
-        model = MockTimeSeriesModel(id=42)
-
-        # Test with 'every' parameter for resampling to 1-hour bars
-        result = model.get_timeseries_frame(mock_repo, every="1h")
-
-        # Verify the repository was called (without 'every' - it's handled locally)
-        mock_repo.get_timeseries_frame.assert_called_once_with(
-            table="test_table", instrument_id=42, start=None, end=None, timezone=None
-        )
-
-        # Verify the result is resampled (2 hourly bars from 4 30-min bars)
+        # Four 30-minute bars collapse into two hourly bars.
         assert result.height == 2
-        # Verify OHLCV aggregation
-        assert "open" in result.columns
-        assert "high" in result.columns
-        assert "low" in result.columns
-        assert "close" in result.columns
-        assert "volume" in result.columns
+        # First hour: open of first bar, max high, min low, close of last bar, summed volume.
+        assert result["open"].to_list() == [100.0, 102.0]
+        assert result["high"].to_list() == [102.0, 104.0]
+        assert result["low"].to_list() == [99.0, 101.0]
+        assert result["close"].to_list() == [101.5, 103.5]
+        assert result["volume"].to_list() == [2100, 2500]
