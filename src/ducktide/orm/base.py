@@ -53,6 +53,21 @@ from typing import Any, ClassVar, Self
 from pydantic import BaseModel, ConfigDict
 
 
+def _is_column_key(key: str) -> bool:
+    """Return True if a schema key is a real column, not a table constraint.
+
+    Entries such as ``"FOREIGN KEY (id)"`` contain spaces or parentheses and are
+    excluded from the inferred column list.
+
+    Args:
+        key: A key from a model's ``_schema`` mapping.
+
+    Returns:
+        True if the key names a column, False if it is a constraint entry.
+    """
+    return " " not in key and "(" not in key
+
+
 class DomainModel(BaseModel):
     """Base class for domain models.
 
@@ -139,23 +154,46 @@ class ORMModel(ABC):
             definition. Users don't need to call it directly.
         """
         super().__init_subclass__(**kwargs)
+        cls._infer_table_name()
+        cls._infer_columns()
 
-        # Automatically determine _table_name if not explicitly defined or is empty
-        if not cls._table_name:
-            # Infer from class name with suffix stripping
-            name = cls.__name__.lower()
-            for suffix in ("ormmodel", "model", "orm"):
-                if name.endswith(suffix):
-                    name = name[: -len(suffix)]
-                    break
-            cls._table_name = name
+    @classmethod
+    def _infer_table_name(cls) -> None:
+        """Set ``_table_name`` from the class name when not explicitly defined.
 
-        # Automatically determine _columns from _schema keys if not explicitly defined
-        if (not hasattr(cls, "_columns") or cls._columns is getattr(ORMModel, "_columns", None)) and hasattr(
-            cls, "_schema"
-        ):
-            # Filter out entries that are not columns (e.g., FOREIGN KEY constraints)
-            cls._columns = [k for k in cls._schema if " " not in k and "(" not in k]
+        The inferred name is the lower-cased class name with a trailing
+        ``ormmodel``/``model``/``orm`` suffix stripped.
+        """
+        if cls._table_name:
+            return
+        name = cls.__name__.lower()
+        for suffix in ("ormmodel", "model", "orm"):
+            if name.endswith(suffix):
+                name = name[: -len(suffix)]
+                break
+        cls._table_name = name
+
+    @classmethod
+    def _infer_columns(cls) -> None:
+        """Set ``_columns`` from ``_schema`` keys when not explicitly defined.
+
+        Non-column entries (e.g. ``FOREIGN KEY`` constraints) are filtered out.
+        Does nothing if ``_columns`` was set explicitly or no ``_schema`` exists.
+        """
+        if not cls._should_infer_columns():
+            return
+        cls._columns = [k for k in cls._schema if _is_column_key(k)]
+
+    @classmethod
+    def _should_infer_columns(cls) -> bool:
+        """Return True when ``_columns`` should be inferred from ``_schema``.
+
+        Inference applies only when a ``_schema`` exists and ``_columns`` has not
+        been set explicitly on the subclass (i.e. it is still the inherited
+        placeholder from :class:`ORMModel`).
+        """
+        columns_unset = not hasattr(cls, "_columns") or cls._columns is getattr(ORMModel, "_columns", None)
+        return hasattr(cls, "_schema") and columns_unset
 
     @classmethod
     def generate_create_table_sql(cls) -> str:

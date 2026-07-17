@@ -68,69 +68,123 @@ class TimeSeriesIngestMixin(TimeSeriesBase):
               the Polars DataFrame.
         """
         self._validate_table_name(table)
+        self._ensure_schema(table)
 
-        # Ensure schema exists when provided. table is validated by
-        # _validate_table_name above, and the schema part is further stripped of
-        # quote characters by _quote_unquoted; not user data.
+        # Create table if missing, otherwise append only new rows.
+        if not self.has_table(table):
+            self._create_table_from_frame(table, frame)
+            return
+
+        if "instrument_id" in frame.columns:
+            self._append_new_per_instrument(table, frame)
+        else:
+            self._append_new_global(table, frame)
+
+    def _ensure_schema(self, table: str) -> None:
+        """Create the table's schema if the name is schema-qualified.
+
+        Args:
+            table: The (possibly schema-qualified) destination table name.
+
+        Note:
+            ``table`` is validated by :meth:`_validate_table_name`, and the
+            schema part is further stripped of quote characters by
+            ``_quote_unquoted``; not user data.
+        """
         if "." in table:
             schema, _ = table.split(".", 1)
             self.con.execute(sql.create_schema_if_not_exists(self._quote_unquoted(schema)))
 
-        # Create table if missing
-        if not self.has_table(table):
-            # register and create table from Polars df. quoted_table is produced
-            # by _quote_identifier; data rows come from the registered
-            # temp_ingest relation, not string interpolation.
-            self.con.register("temp_ingest", frame)
-            quoted_table = self._quote_identifier(table)
-            self.con.execute(sql.create_table_as(quoted_table, sql.select_all("temp_ingest")))
-            self.con.unregister("temp_ingest")
-            return
+    def _create_table_from_frame(self, table: str, frame: pl.DataFrame) -> None:
+        """Create a new table from a Polars DataFrame using DuckDB inference.
 
-        # Table exists: append only new rows
+        Args:
+            table: The destination table name.
+            frame: The DataFrame whose schema and rows seed the new table.
+
+        Note:
+            ``quoted_table`` is produced by ``_quote_identifier``; data rows come
+            from the registered ``temp_ingest`` relation, not string
+            interpolation.
+        """
+        self.con.register("temp_ingest", frame)
         quoted_table = self._quote_identifier(table)
+        self.con.execute(sql.create_table_as(quoted_table, sql.select_all("temp_ingest")))
+        self.con.unregister("temp_ingest")
 
-        if "instrument_id" in frame.columns:
-            # Optimized approach: Get max timestamp per instrument from the database
-            # to filter the incoming frame before ingestion.
-            # This avoids the expensive WHERE NOT EXISTS subquery for every row.
-            logger.info(f"Ingesting {len(frame)} rows into '{table}'...")
+    def _append_new_per_instrument(self, table: str, frame: pl.DataFrame) -> None:
+        """Append rows newer than each instrument's current max timestamp.
 
-            # 1. Get existing max timestamps per instrument. quoted_table is
-            # produced by _quote_identifier from a name already validated by
-            # _validate_table_name, and time_col is the configured column name;
-            # no user data is interpolated.
-            max_ts_df = self.con.execute(sql.select_max_per_instrument(quoted_table, self.time_col)).pl()
+        Uses the per-instrument max timestamp from the database to filter the
+        incoming frame before ingestion, avoiding an expensive
+        ``WHERE NOT EXISTS`` subquery for every row.
 
-            if max_ts_df.height > 0:
-                # 2. Join and filter in Polars (usually faster than complex SQL anti-joins in this context)
-                # Ensure time zones match for comparison if we have Datetime
-                dtype = frame.schema[self.time_col]
-                if isinstance(dtype, pl.Datetime) and dtype.time_zone:
-                    df_tz = dtype.time_zone
-                    max_ts_df = max_ts_df.with_columns(pl.col("max_ts").dt.convert_time_zone(df_tz))
+        Args:
+            table: The destination table name.
+            frame: The DataFrame to append (must contain ``instrument_id``).
+        """
+        logger.info(f"Ingesting {len(frame)} rows into '{table}'...")
 
-                new_frame = frame.join(max_ts_df, on="instrument_id", how="left")
-                new_frame = new_frame.filter(
-                    (pl.col("max_ts").is_null()) | (pl.col(self.time_col) > pl.col("max_ts"))
-                ).drop("max_ts")
-            else:
-                new_frame = frame
+        # quoted_table is produced by _quote_identifier from a name already
+        # validated by _validate_table_name, and time_col is the configured
+        # column name; no user data is interpolated.
+        quoted_table = self._quote_identifier(table)
+        max_ts_df = self.con.execute(sql.select_max_per_instrument(quoted_table, self.time_col)).pl()
+        new_frame = self._filter_new_per_instrument(frame, max_ts_df)
 
-            if new_frame.height > 0:
-                logger.info(f"Appending {len(new_frame)} new rows to '{table}'...")
-                self._append(table, new_frame)
-            else:
-                logger.info(f"No new rows to append to '{table}'.")
+        if new_frame.height > 0:
+            logger.info(f"Appending {len(new_frame)} new rows to '{table}'...")
+            self._append(table, new_frame)
         else:
-            # No instrument_id: global max timestamp. quoted_table is
-            # _quote_identifier output from a validated name and time_col is the
-            # configured column name; the '1970-01-01' epoch is a fixed literal.
-            result = self.con.execute(sql.select_coalesce_max(quoted_table, self.time_col)).fetchone()
-            max_ts = result[0] if result else "1970-01-01"
-            new = frame.filter(pl.col(f"{self.time_col}") > max_ts)
-            if new.height:
-                self._append(table, new)
+            logger.info(f"No new rows to append to '{table}'.")
+
+    def _filter_new_per_instrument(self, frame: pl.DataFrame, max_ts_df: pl.DataFrame) -> pl.DataFrame:
+        """Return only the rows newer than the existing per-instrument maxima.
+
+        Args:
+            frame: The incoming DataFrame to filter.
+            max_ts_df: Existing max timestamps per instrument (column ``max_ts``).
+
+        Returns:
+            The subset of ``frame`` with timestamps strictly greater than the
+            existing maximum (or with no existing data for that instrument).
+        """
+        if max_ts_df.height == 0:
+            return frame
+
+        # Join and filter in Polars (usually faster than complex SQL anti-joins
+        # in this context). Ensure time zones match for comparison if we have
+        # a timezone-aware Datetime column.
+        dtype = frame.schema[self.time_col]
+        if isinstance(dtype, pl.Datetime) and dtype.time_zone:
+            max_ts_df = max_ts_df.with_columns(pl.col("max_ts").dt.convert_time_zone(dtype.time_zone))
+
+        return (
+            frame.join(max_ts_df, on="instrument_id", how="left")
+            .filter((pl.col("max_ts").is_null()) | (pl.col(self.time_col) > pl.col("max_ts")))
+            .drop("max_ts")
+        )
+
+    def _append_new_global(self, table: str, frame: pl.DataFrame) -> None:
+        """Append rows newer than the table's single global max timestamp.
+
+        Used when the frame has no ``instrument_id`` column.
+
+        Args:
+            table: The destination table name.
+            frame: The DataFrame to append.
+
+        Note:
+            ``quoted_table`` is ``_quote_identifier`` output from a validated
+            name and ``time_col`` is the configured column name; the
+            ``'1970-01-01'`` epoch is a fixed literal.
+        """
+        quoted_table = self._quote_identifier(table)
+        result = self.con.execute(sql.select_coalesce_max(quoted_table, self.time_col)).fetchone()
+        max_ts = result[0] if result else "1970-01-01"
+        new = frame.filter(pl.col(f"{self.time_col}") > max_ts)
+        if new.height:
+            self._append(table, new)
 
     def _append(self, table: str, df: pl.DataFrame) -> None:
         """Append rows from a DataFrame to an existing table.

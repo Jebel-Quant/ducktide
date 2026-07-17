@@ -55,6 +55,30 @@ class QueryMixin(TableBase):
             f"Comparison suffixes: {', '.join(sorted(_FILTER_SUFFIXES))}"
         )
 
+    def _build_filter_conditions(self, filters: dict[str, Any]) -> tuple[list[str], list[Any]]:
+        """Translate keyword filters into SQL conditions and bound parameters.
+
+        Args:
+            filters: Column-based filters, each name resolved via
+                :meth:`_resolve_filter`. A ``None`` value with the equality
+                operator becomes an ``IS NULL`` test rather than a bound param.
+
+        Returns:
+            A tuple of (list of condition fragments, list of parameter values).
+        """
+        conditions: list[str] = []
+        params: list[Any] = []
+
+        for name, value in filters.items():
+            column, op = self._resolve_filter(name)
+            if value is None and op == "=":
+                conditions.append(f"{column} IS NULL")
+            else:
+                conditions.append(f"{column} {op} ?")
+                params.append(value)
+
+        return conditions, params
+
     def select(
         self,
         where_clause: str | None = None,
@@ -129,16 +153,7 @@ class QueryMixin(TableBase):
             placeholders) rather than string concatenation to prevent SQL
             injection vulnerabilities.
         """
-        conditions: list[str] = []
-        params: list[Any] = []
-
-        for name, value in filters.items():
-            column, op = self._resolve_filter(name)
-            if value is None and op == "=":
-                conditions.append(f"{column} IS NULL")
-            else:
-                conditions.append(f"{column} {op} ?")
-                params.append(value)
+        conditions, params = self._build_filter_conditions(filters)
 
         # Raw clause goes last (unparenthesized) so trailing SQL such as
         # ORDER BY / LIMIT stays at the end of the statement.

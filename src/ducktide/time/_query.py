@@ -86,21 +86,7 @@ class TimeSeriesQueryMixin(TimeSeriesBase):
         try:
             query, params = self._build_query(table, instrument_id, start, end)
             frame = self.con.execute(query, params).pl().sort(self.time_col)
-
-            if timezone is not None and frame[self.time_col].dtype.is_temporal():
-                # Polars: convert timestamp to target timezone
-                # Only attempt conversion if the column is a Datetime type
-                # If it's just a Date, we might want to cast it to Datetime first or skip
-                # Most financial data with timezones will be Datetime.
-                # dt.convert_time_zone requires Datetime.
-                if isinstance(frame[self.time_col].dtype, pl.Datetime):
-                    frame = frame.with_columns(pl.col(self.time_col).dt.convert_time_zone(timezone))
-                elif isinstance(frame[self.time_col].dtype, pl.Date):
-                    # For Date, conversion doesn't make much sense without time,
-                    # but we should at least not crash.
-                    # Optionally cast to datetime then convert?
-                    # Usually, if user asks for timezone, they expect Datetime.
-                    pass
+            frame = self._apply_timezone(frame, timezone)
 
         except Exception as exc:
             # Anything beyond a missing table is a real failure: surface it as a
@@ -109,6 +95,30 @@ class TimeSeriesQueryMixin(TimeSeriesBase):
             raise QueryError(f"Failed to query timeseries from '{table}': {exc}") from exc  # noqa: TRY003
         else:
             return frame
+
+    def _apply_timezone(self, frame: pl.DataFrame, timezone: str | None) -> pl.DataFrame:
+        """Convert the timestamp column to a target timezone when applicable.
+
+        Args:
+            frame: The queried DataFrame.
+            timezone: Optional target timezone. If None, the frame is returned
+                unchanged.
+
+        Returns:
+            The frame with its timestamp column converted, or the original frame
+            when no conversion applies.
+
+        Note:
+            Conversion only happens for a ``Datetime`` column, since
+            ``dt.convert_time_zone`` requires one. A ``Date`` column is left
+            unchanged rather than raising; most timezone-aware financial data is
+            ``Datetime``.
+        """
+        if timezone is None or not frame[self.time_col].dtype.is_temporal():
+            return frame
+        if isinstance(frame[self.time_col].dtype, pl.Datetime):
+            return frame.with_columns(pl.col(self.time_col).dt.convert_time_zone(timezone))
+        return frame
 
     def _build_query(
         self,

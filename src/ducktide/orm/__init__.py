@@ -20,7 +20,9 @@ Note on naming (`jqr.database.orm` vs `jqr.orm.models`):
     ``Contract`` — live in :mod:`jqr.orm.models`. Both packages share the "orm"
     token but sit at different layers: ``jqr.database.orm`` is infrastructure,
     ``jqr.orm.models`` is the futures-specific application layer that subclasses
-    it.
+    it. The layering (``jqr.orm`` → ``jqr.database``, never the reverse) is
+    enforced by an import-linter contract (``make arch``; see
+    ``[tool.importlinter]`` in ``pyproject.toml``).
 
 Note:
     Models do NOT have save(), find(), or delete() methods. All database

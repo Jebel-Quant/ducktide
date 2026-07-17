@@ -7,17 +7,13 @@ import/export). The concrete :class:`~jqr.database.time.TimeSeriesDB` composes
 this base with those mixins.
 """
 
-import re
 from pathlib import Path
 from typing import Any, Self
 
 import duckdb
 import polars as pl
 
-from ..exceptions import ValidationError
-
-# Valid SQL identifier for table and schema names (no quoting tricks, no injection).
-_IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+from ..utils import sql
 
 
 class TimeSeriesBase:
@@ -45,7 +41,10 @@ class TimeSeriesBase:
                 the same file without locks.
         """
         self.con = duckdb.connect(path or ":memory:", read_only=read_only)
-        self.time_col = time_col
+        # ``time_col`` is interpolated directly into SQL (identifiers cannot be
+        # bound as parameters), so validate it at the object boundary — this is
+        # the sole user-supplied identifier reaching the SQL builders.
+        self.time_col = sql.validate_identifier(time_col)
         self.read_only = read_only
 
     # ------------------
@@ -63,13 +62,9 @@ class TimeSeriesBase:
         Raises:
             ValidationError: If the table or schema name is not a valid SQL identifier.
         """
-        parts = table.split(".")
-        if len(parts) > 2 or not all(_IDENTIFIER_RE.match(part) for part in parts):
-            raise ValidationError(  # noqa: TRY003
-                f"Invalid table name '{table}': expected an identifier matching "
-                f"[A-Za-z_][A-Za-z0-9_]*, optionally qualified as 'schema.table'"
-            )
-        return table
+        # Single audited validator lives in the SQL-composition module so the
+        # "caller validated it" contract is enforced next to the interpolation.
+        return sql.validate_identifier(table, kind="table name")
 
     def _quote_identifier(self, ident: str) -> str:
         """Quote a table or schema identifier for safe SQL use.
@@ -80,7 +75,9 @@ class TimeSeriesBase:
         Returns:
             A quoted identifier string safe for use in SQL statements.
         """
-        # duckdb compatible quoting
+        # duckdb-compatible quoting; stripping embedded quotes makes the result
+        # injection-safe by construction (validation is enforced separately by
+        # :meth:`_validate_table_name` before any name reaches here).
         if "." in ident:
             schema, name = ident.split(".", 1)
             schema_clean = schema.replace('"', "")

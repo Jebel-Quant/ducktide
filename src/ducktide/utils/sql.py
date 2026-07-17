@@ -17,7 +17,87 @@ placeholders by the callers.
 Concentrating the interpolation here keeps the Bandit ``B608`` (and Ruff
 ``S608``) audit surface to this single, reviewed module instead of ~20 call
 sites scattered across the database layer.
+
+The "caller validated it" contract is enforced *in code*, not merely asserted
+in docstrings:
+
+* Bare identifiers are produced through :func:`quote_identifier` /
+  :func:`validate_identifier`, which reject anything that is not a plain SQL
+  identifier (optionally ``schema.table`` qualified). Callers that build table
+  names route through these (see
+  :class:`jqr.database.time._base.TimeSeriesBase`).
+* The two builders that interpolate a *raw* column/schema identifier
+  (:func:`select_max_per_instrument`, :func:`select_coalesce_max`,
+  :func:`create_schema_if_not_exists`) call :func:`validate_identifier` on that
+  argument themselves, so the ``# nosec B608`` on those lines is guarded by a
+  demonstrable, test-covered validation step.
+* Path literals are pre-escaped via
+  :func:`~jqr.database.utils.path_validation.escape_path_for_sql`; option lists
+  and query fragments are code-built, never raw user data. Row *values* are
+  always bound via ``?`` placeholders by the callers.
 """
+
+import re
+
+from jqr.database.exceptions import ValidationError
+
+# Valid SQL identifier (no quoting tricks, no injection); optionally qualified
+# as ``schema.table`` (at most two dot-separated parts).
+_IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
+
+def validate_identifier(ident: str, kind: str = "SQL identifier") -> str:
+    """Validate a bare SQL identifier, optionally schema-qualified.
+
+    Accepts a single identifier (``table``) or a two-part ``schema.table``
+    reference, where each part matches ``[A-Za-z_][A-Za-z0-9_]*``. This is the
+    in-code enforcement of the "caller validated it" contract: any identifier
+    interpolated into a builder must pass through here (or through
+    :func:`quote_identifier`) first.
+
+    Args:
+        ident: The identifier to validate.
+        kind: Human-readable noun used in the error message (e.g. ``"table
+            name"``); lets callers surface a domain-specific message.
+
+    Returns:
+        The identifier, unchanged.
+
+    Raises:
+        ValidationError: If ``ident`` is not a valid (optionally qualified) SQL
+            identifier.
+    """
+    parts = ident.split(".")
+    if len(parts) > 2 or not all(_IDENTIFIER_RE.match(part) for part in parts):
+        raise ValidationError(  # noqa: TRY003
+            f"Invalid {kind} '{ident}': expected an identifier matching "
+            f"[A-Za-z_][A-Za-z0-9_]*, optionally qualified as 'schema.table'"
+        )
+    return ident
+
+
+def quote_identifier(ident: str) -> str:
+    """Validate then DuckDB-quote a table or schema identifier.
+
+    The single audited way to turn an identifier into an interpolation-safe,
+    double-quoted SQL fragment. Validation happens first (:func:`validate_identifier`),
+    so a quoted identifier can never carry an unvalidated name.
+
+    Args:
+        ident: The identifier to quote, optionally schema-qualified
+            (e.g. ``"schema.table"``).
+
+    Returns:
+        The double-quoted identifier (e.g. ``'"schema"."table"'``).
+
+    Raises:
+        ValidationError: If ``ident`` is not a valid identifier.
+    """
+    validate_identifier(ident)
+    if "." in ident:
+        schema, name = ident.split(".", 1)
+        return f'"{schema}"."{name}"'
+    return f'"{ident}"'
 
 
 def count_all(source: str) -> str:
@@ -115,8 +195,12 @@ def create_schema_if_not_exists(schema: str) -> str:
 
     Returns:
         The create-schema statement.
+
+    Raises:
+        ValidationError: If ``schema`` is not a valid SQL identifier.
     """
-    return f"CREATE SCHEMA IF NOT EXISTS {schema}"  # nosec B608
+    validate_identifier(schema)
+    return f"CREATE SCHEMA IF NOT EXISTS {schema}"  # nosec B608  # schema validated above
 
 
 def drop_table_if_exists(table: str) -> str:
@@ -192,8 +276,12 @@ def select_max_per_instrument(table: str, time_col: str) -> str:
 
     Returns:
         The grouped max-timestamp query.
+
+    Raises:
+        ValidationError: If ``time_col`` is not a valid SQL identifier.
     """
-    return f"SELECT instrument_id, MAX({time_col}) as max_ts FROM {table} GROUP BY instrument_id"  # nosec B608  # noqa: S608
+    validate_identifier(time_col)
+    return f"SELECT instrument_id, MAX({time_col}) as max_ts FROM {table} GROUP BY instrument_id"  # nosec B608  # noqa: S608  # time_col validated above
 
 
 def select_coalesce_max(table: str, time_col: str, default: str = "1970-01-01") -> str:
@@ -208,5 +296,9 @@ def select_coalesce_max(table: str, time_col: str, default: str = "1970-01-01") 
 
     Returns:
         The coalesced max-timestamp query.
+
+    Raises:
+        ValidationError: If ``time_col`` is not a valid SQL identifier.
     """
-    return f"SELECT COALESCE(MAX({time_col}),'{default}') FROM {table}"  # nosec B608  # noqa: S608
+    validate_identifier(time_col)
+    return f"SELECT COALESCE(MAX({time_col}),'{default}') FROM {table}"  # nosec B608  # noqa: S608  # time_col validated above
