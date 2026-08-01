@@ -26,11 +26,23 @@ in docstrings:
   identifier (optionally ``schema.table`` qualified). Callers that build table
   names route through these (see
   :class:`jqr.database.time._base.TimeSeriesBase`).
-* The two builders that interpolate a *raw* column/schema identifier
+* The three builders that interpolate a *raw* column/schema identifier
   (:func:`select_max_per_instrument`, :func:`select_coalesce_max`,
   :func:`create_schema_if_not_exists`) call :func:`validate_identifier` on that
-  argument themselves, so the ``# nosec B608`` on those lines is guarded by a
+  argument themselves, so the suppression on those lines is guarded by a
   demonstrable, test-covered validation step.
+
+Suppression comments are kept minimal and load-bearing: ``# nosec B608`` appears
+only on the builders Bandit actually flags, and ``# noqa: S608`` only where Ruff
+flags. Do not add either pre-emptively — Bandit reports a marker that suppresses
+nothing as "nosec encountered, but no failed test", so a redundant one shows up as
+gate noise rather than staying silent.
+
+When pruning these, validate against ``make fmt`` and not only ``make security``.
+The two invoke Bandit differently (the pre-commit hook passes ``--ini .bandit``
+with its own exclude list) and they *disagree* about which lines trigger B608:
+``make security`` reports some of the markers below as redundant while the
+``make fmt`` hook fails without them.
 * Path literals are pre-escaped via
   :func:`~jqr.database.utils.path_validation.escape_path_for_sql`; option lists
   and query fragments are code-built, never raw user data. Row *values* are
@@ -171,7 +183,7 @@ def insert_from_query(table: str, query: str) -> str:
     Returns:
         The insert-from-select statement.
     """
-    return f"INSERT INTO {table} {query}"  # nosec B608
+    return f"INSERT INTO {table} {query}"
 
 
 def create_table_as(table: str, query: str) -> str:
@@ -184,7 +196,7 @@ def create_table_as(table: str, query: str) -> str:
     Returns:
         The create-table-as-select statement.
     """
-    return f"CREATE TABLE {table} AS {query}"  # nosec B608
+    return f"CREATE TABLE {table} AS {query}"
 
 
 def create_schema_if_not_exists(schema: str) -> str:
@@ -200,7 +212,7 @@ def create_schema_if_not_exists(schema: str) -> str:
         ValidationError: If ``schema`` is not a valid SQL identifier.
     """
     validate_identifier(schema)
-    return f"CREATE SCHEMA IF NOT EXISTS {schema}"  # nosec B608  # schema validated above
+    return f"CREATE SCHEMA IF NOT EXISTS {schema}"  # schema validated above
 
 
 def drop_table_if_exists(table: str) -> str:
@@ -213,7 +225,7 @@ def drop_table_if_exists(table: str) -> str:
     Returns:
         The drop-table statement.
     """
-    return f"DROP TABLE IF EXISTS {table}"  # nosec B608
+    return f"DROP TABLE IF EXISTS {table}"
 
 
 def copy_select_to(columns: str, source: str, escaped_path: str, options: str) -> str:
@@ -247,8 +259,8 @@ def read_csv_expr(escaped_path: str, options: str = "") -> str:
         clause.
     """
     if options:
-        return f"read_csv_auto('{escaped_path}', {options})"  # nosec B608
-    return f"read_csv_auto('{escaped_path}')"  # nosec B608
+        return f"read_csv_auto('{escaped_path}', {options})"
+    return f"read_csv_auto('{escaped_path}')"
 
 
 def read_parquet_expr(escaped_path: str) -> str:
@@ -261,7 +273,7 @@ def read_parquet_expr(escaped_path: str) -> str:
     Returns:
         The ``read_parquet`` table-valued expression usable in a ``FROM`` clause.
     """
-    return f"read_parquet('{escaped_path}')"  # nosec B608
+    return f"read_parquet('{escaped_path}')"
 
 
 def select_max_per_instrument(table: str, time_col: str) -> str:
