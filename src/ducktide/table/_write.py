@@ -106,12 +106,20 @@ class WriteMixin(TableBase):
 
         Raises:
             QueryError: If a database constraint (e.g., foreign key or primary key)
-                is violated.
+                is violated. The batch is atomic, so no rows from a failed call
+                remain in the table.
 
         Performance:
             For inserting 1000+ records, bulk_insert() can be 10-100x faster
             than individual insert() calls due to reduced SQL parsing and
             transaction overhead.
+
+        Atomicity:
+            The whole batch is wrapped in an explicit transaction. DuckDB
+            autocommits each statement otherwise, which would leave the rows
+            written before a mid-batch constraint violation committed while the
+            caller only saw the exception — and the obvious retry of the same
+            batch would then collide on the primary keys it had just written.
         """
         objs = list(objs)
         if not objs:
@@ -125,7 +133,15 @@ class WriteMixin(TableBase):
         statement = sql.insert_row(self.table_name, cols, placeholders)
 
         values = [self._values_from_obj(obj) for obj in objs]
+        self.connection.begin()
         try:
             self.connection.executemany(statement, values)
         except duckdb.ConstraintException as exc:
+            self.connection.rollback()
             raise QueryError(f"Constraint violation inserting into '{self.table_name}': {exc}") from exc  # noqa: TRY003
+        except Exception:
+            # Any other failure must not leave the transaction open on a
+            # long-lived connection; re-raise unchanged once rolled back.
+            self.connection.rollback()
+            raise
+        self.connection.commit()

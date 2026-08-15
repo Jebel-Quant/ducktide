@@ -38,6 +38,50 @@ def test_validate_file_path_must_exist_present(tmp_path):
     assert result == p.resolve()
 
 
+def test_validate_file_path_without_base_dir_normalises_traversal(tmp_path):
+    """Without base_dir, "../" is normalised rather than rejected.
+
+    This pins the documented *non*-guarantee. The docstring used to claim this
+    call prevented path traversal; it does not, and the only thing stopping that
+    claim from creeping back is a test that asserts the real behaviour.
+    """
+    escaped = validate_file_path(tmp_path / ".." / "outside.csv")
+    assert escaped == (tmp_path.parent / "outside.csv").resolve()
+
+
+def test_validate_file_path_base_dir_accepts_contained_path(tmp_path):
+    """A path inside base_dir is accepted and returned resolved."""
+    p = tmp_path / "nested" / "data.csv"
+    assert validate_file_path(p, base_dir=tmp_path) == p.resolve()
+
+
+def test_validate_file_path_base_dir_rejects_traversal(tmp_path):
+    """A path escaping base_dir via "../" raises ValidationError."""
+    with pytest.raises(ValidationError, match="outside base directory"):
+        validate_file_path(tmp_path / ".." / "outside.csv", base_dir=tmp_path)
+
+
+def test_validate_file_path_base_dir_rejects_escaping_symlink(tmp_path):
+    """A symlink inside base_dir that points outside it is rejected.
+
+    Confinement is checked after resolution, which is what makes it cover
+    symlinks and not just textual "../" segments.
+    """
+    base = tmp_path / "base"
+    base.mkdir()
+    outside = tmp_path / "outside.csv"
+    outside.touch()
+
+    link = base / "link.csv"
+    try:
+        link.symlink_to(outside)
+    except (OSError, NotImplementedError):  # pragma: no cover - Windows without symlink privilege
+        pytest.skip("symlink creation not permitted on this platform")
+
+    with pytest.raises(ValidationError, match="outside base directory"):
+        validate_file_path(link, base_dir=base)
+
+
 def test_escape_path_for_sql_no_quotes(tmp_path):
     """Test that a path without quotes is returned unchanged."""
     p = tmp_path / "data.csv"
