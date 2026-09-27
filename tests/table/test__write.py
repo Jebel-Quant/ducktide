@@ -19,12 +19,14 @@ from .conftest import MockModel
 
 
 class _FailingInsert:
-    """Delegate to a real DuckDB connection but fail every ``INSERT``.
+    """Delegate to a real DuckDB connection but fail every ``INSERT`` after it has run.
 
     Used to exercise the non-constraint failure path in ``bulk_insert``, where a
-    rollback must still happen. ``begin``, ``rollback`` and every other call pass
-    straight through to the real connection so the transaction is genuine. Both
-    the frame path (``execute``) and the fallback path (``executemany``) fail.
+    rollback must still happen. The real statement executes first, so the rows
+    are written inside the open transaction and only a rollback removes them.
+    ``begin``, ``rollback`` and every other call pass straight through to the
+    real connection so the transaction is genuine. Both the frame path
+    (``execute``) and the fallback path (``executemany``) fail.
     """
 
     def __init__(self, inner):
@@ -36,16 +38,24 @@ class _FailingInsert:
         return getattr(self._inner, name)
 
     def execute(self, statement, *args, **kwargs):
-        """Fail on INSERT statements; forward everything else."""
+        """Run the statement, then fail if it was an INSERT."""
+        result = self._inner.execute(statement, *args, **kwargs)
         if statement.startswith("INSERT"):
             msg = "connection lost"
             raise RuntimeError(msg)
-        return self._inner.execute(statement, *args, **kwargs)
+        return result
 
-    def executemany(self, *_args, **_kwargs):
-        """Fail with an error that is not a ConstraintException."""
+    def executemany(self, *args, **kwargs):
+        """Run the batch, then fail with an error that is not a ConstraintException."""
+        self._inner.executemany(*args, **kwargs)
         msg = "connection lost"
         raise RuntimeError(msg)
+
+
+def _assert_no_open_transaction(connection):
+    """Fail if a transaction was left open (DuckDB rejects a nested BEGIN)."""
+    connection.begin()
+    connection.rollback()
 
 
 class TokenModel(ORMModel):
@@ -157,8 +167,10 @@ class TestWriteMixin:
 
         monkeypatch.undo()
 
-        # The rollback leaves the connection usable rather than stuck in a
-        # dangling transaction, so a subsequent write still works.
+        # The batch's rows were written before the failure, so only a rollback
+        # removes them; it also closes the transaction rather than leaving it
+        # dangling, so a subsequent write still works.
+        _assert_no_open_transaction(table.connection)
         assert len(table) == 1
         table.insert(MockModel(4, "after"))
         assert len(table) == 2
@@ -210,6 +222,7 @@ class TestWriteMixin:
             token_table.bulk_insert([TokenModel(1, uuid.UUID(int=1)), TokenModel(2, uuid.UUID(int=2))])
         monkeypatch.undo()
 
+        _assert_no_open_transaction(token_table.connection)
         assert len(token_table) == 0
         token_table.insert(TokenModel(3, uuid.UUID(int=3)))
         assert len(token_table) == 1
