@@ -16,8 +16,9 @@ Immutable Pydantic models and append-fast time series on DuckDB + Polars.
 ducktide is a small persistence layer with two halves:
 
 - **Entity tables**: frozen Pydantic models persisted through repositories
-  (`DB` + `Table`). Models carry no `save()`/`find()`/`delete()` methods;
-  all reads and writes go through the table, so domain objects stay plain values.
+  (`DB` + `Table`). One model defines a table — its fields are the columns —
+  and carries no `save()`/`find()`/`delete()` methods; all reads and writes go
+  through the table, so domain objects stay plain values.
 - **Time series**: `TimeSeriesDB`, an append-only store for high-volume
   numerical data (prices, volumes, sensor readings). Ingestion only appends rows
   newer than what is already stored, per instrument, so re-ingesting an
@@ -36,38 +37,22 @@ Requires Python 3.11+.
 
 ## Entity tables
 
-Define a domain model and its table mapping:
+Define a domain model; the table is derived from it:
 
 ```python
 import tempfile
-from functools import partial
 from pathlib import Path
-from typing import ClassVar
 
-from ducktide import DB, Table
-from ducktide.orm import DomainModel, ORMModel
+from ducktide import DB, DomainModel, Table
 
 
 class Sensor(DomainModel):
-    table_name: ClassVar[str] = "sensor"
-
     id: int
     name: str
     site: str
 
 
-class SensorORM(ORMModel, Sensor):
-    _table_name: ClassVar[str] = "sensor"
-    _domain_model: ClassVar[type] = Sensor
-    _primary_key: ClassVar[str] = "id"
-    _schema: ClassVar[dict[str, str]] = {
-        "id": "INTEGER PRIMARY KEY",
-        "name": "TEXT NOT NULL",
-        "site": "TEXT NOT NULL",
-    }
-
-
-db = DB(tables_map={"sensor": partial(Table, model_class=SensorORM)})  # or db_path="sensors.duckdb"
+db = DB(tables_map={"sensor": Table.of(Sensor)})  # or db_path="sensors.duckdb"
 
 db.sensor.bulk_insert(
     [
@@ -76,11 +61,18 @@ db.sensor.bulk_insert(
     ]
 )
 
-db.sensor.select(site="berlin")  # [SensorORM(id=1, name='north', site='berlin')]
-db.sensor.get(2)  # SensorORM(id=2, name='south', site='zurich')
+db.sensor.select(site="berlin")  # [Sensor(id=1, name='north', site='berlin')]
+db.sensor.get(2)  # Sensor(id=2, name='south', site='zurich')
 db.sensor.to_frame()  # polars.DataFrame
 db.sensor.to_parquet(Path(tempfile.mkdtemp()) / "sensors.parquet")
 ```
+
+The columns, their DuckDB types and `NOT NULL` come from the fields (`X | None`
+fields are nullable), and rows come back as `Sensor` instances. `Table.of`
+takes `name=` (default: the lower-cased class name), `primary_key=` (default
+`"id"`) and `sql_types=` to override a column's definition, e.g.
+`sql_types={"name": "VARCHAR NOT NULL UNIQUE"}`, or to store a type the mapping
+does not cover.
 
 ## Time series
 

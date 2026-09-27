@@ -92,3 +92,17 @@ def test_valid_time_col_builders_roundtrip() -> None:
     assert sql.select_max_per_instrument("tbl", "ts").startswith("SELECT instrument_id, MAX(ts)")
     assert sql.select_coalesce_max("tbl", "ts").startswith("SELECT COALESCE(MAX(ts)")
     assert sql.create_schema_if_not_exists("analytics") == "CREATE SCHEMA IF NOT EXISTS analytics"
+
+
+def test_create_table_if_not_exists_builds_columns_in_order() -> None:
+    """Column definitions are emitted in mapping order."""
+    statement = sql.create_table_if_not_exists("sensor", {"id": "BIGINT PRIMARY KEY", "name": "VARCHAR NOT NULL"})
+    assert statement == "CREATE TABLE IF NOT EXISTS sensor (\n    id BIGINT PRIMARY KEY,\n    name VARCHAR NOT NULL\n)"
+
+
+def test_create_table_if_not_exists_rejects_bad_identifiers() -> None:
+    """Table and column names are validated, since they come from class and field names."""
+    with pytest.raises(ValidationError, match="table name"):
+        sql.create_table_if_not_exists("t; DROP TABLE x", {"id": "BIGINT"})
+    with pytest.raises(ValidationError, match="column name"):
+        sql.create_table_if_not_exists("t", {"id); DROP TABLE x; --": "BIGINT"})

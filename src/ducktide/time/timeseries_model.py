@@ -24,7 +24,7 @@ class TimeSeriesModel(ABC):
     """Abstract base class for domain models exposing time series data.
 
     Subclasses must provide an `instrument_id` property and a `table_name`
-    class attribute (inherited from DomainModel). This mixin provides
+    class attribute (a ``ClassVar[str]``). This mixin provides
     high-level methods to query and ingest time series data associated
     with the instrument.
     """

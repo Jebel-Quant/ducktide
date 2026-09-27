@@ -12,14 +12,13 @@ Key Benefits:
 
 Usage Patterns:
     1. **Context Manager (Recommended):**
-        >>> from functools import partial
         >>> from ducktide.context import use_db, set_default_db, get_default_db
         >>> from ducktide.db import DB
-        >>> from ducktide.orm.example import FooORM
+        >>> from ducktide.example import Foo
         >>> from ducktide.table import Table
         >>>
         >>> # Create database
-        >>> db = DB(tables_map={"foo": partial(Table, model_class=FooORM)})
+        >>> db = DB(tables_map={"foo": Table.of(Foo)})
         >>>
         >>> # Use context manager to set default database
         >>> with use_db(db):

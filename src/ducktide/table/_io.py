@@ -32,15 +32,15 @@ class IOMixin(TableBase):
     def _get_date_columns(self) -> set[str]:
         """Return the set of date columns that need special handling.
 
-        Override in subclasses or configure via model_class to customize
+        Override in subclasses or set ``date_columns`` on the model to customize
         which columns are treated as dates for CSV/Parquet export.
 
         Returns:
             Set of column names that should be cast to VARCHAR for export.
         """
         # Check if model class has date_columns defined
-        if hasattr(self.model_class, "date_columns"):
-            return set(cast(Iterable[str], self.model_class.date_columns))
+        if hasattr(self.model, "date_columns"):
+            return set(cast(Iterable[str], self.model.date_columns))
         # Default: common date column names
         return {"expiry", "date", "timestamp"}
 

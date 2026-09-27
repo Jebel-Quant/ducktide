@@ -24,10 +24,11 @@ Prefer bare `make <target>`; never call `.venv/bin/…` directly. `make help` li
 
 `src/ducktide/`:
 
-- `db.py` — `DB`, DuckDB connection management; tables are attached via `tables_map`.
+- `db.py` — `DB`, DuckDB connection management; tables are attached via `tables_map` (`Table.of(Model)`).
 - `table/` — `Table`, the repository-pattern interface, composed from `_base` (state),
   `_query` (reads), `_write` (writes) and `_io` (Parquet/CSV import/export).
-- `orm/` — `DomainModel`/`ORMModel` base classes (schema, row mapping); `example.py` is a sample model.
+- `model.py` — `DomainModel` (optional frozen base) and `column_definitions`, which derives a table's
+  columns and DuckDB types from a Pydantic model's fields. `example.py` holds the sample `Foo` model.
 - `time/` — `TimeSeriesDB` (append-only time series store), `TimeSeriesModel`,
   `TimeSeriesRepository`, split into `_base`, `_ingest`, `_query`, `_io`.
 - `context.py` — `use_db`/`get_default_db`, a ContextVar-scoped default database.
@@ -35,7 +36,8 @@ Prefer bare `make <target>`; never call `.venv/bin/…` directly. `make help` li
 - `utils/` — `sql.py` (the only place SQL strings with identifiers are composed;
   identifiers go through `validate_identifier`/`quote_identifier`) and `path_validation.py`.
 
-Models carry no persistence methods — all reads and writes go through a `Table`.
+One Pydantic model defines a table and is what reads return; models carry no persistence methods —
+all reads and writes go through a `Table`.
 
 ## Rhiza template split
 
