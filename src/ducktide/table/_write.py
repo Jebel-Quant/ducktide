@@ -30,18 +30,17 @@ class WriteMixin(TableBase):
                 Can be either domain models or their ORM equivalents.
 
         Example:
-            >>> from functools import partial
             >>> from ducktide.db import DB
-            >>> from ducktide.orm.example import FooORM
+            >>> from ducktide.example import Foo
             >>> from ducktide.table import Table
             >>>
-            >>> db = DB(tables_map={"foo": partial(Table, model_class=FooORM)})
-            >>> foo1 = FooORM(id=1, name="apple")
-            >>> foo2 = FooORM(id=2, name="banana")
+            >>> db = DB(tables_map={"foo": Table.of(Foo)})
+            >>> foo1 = Foo(id=1, name="apple")
+            >>> foo2 = Foo(id=2, name="banana")
             >>> db.insert(foo1, foo2)
             >>>
             >>> # Verify insertion
-            >>> table = db.table[FooORM]
+            >>> table = db.table[Foo]
             >>> len(table.select())
             2
 
@@ -86,18 +85,17 @@ class WriteMixin(TableBase):
                 table's column order defined in ``self.columns``.
 
         Example:
-            >>> from functools import partial
             >>> from ducktide.db import DB
-            >>> from ducktide.orm.example import FooORM
+            >>> from ducktide.example import Foo
             >>> from ducktide.table import Table
             >>>
-            >>> db = DB(tables_map={"foo": partial(Table, model_class=FooORM)})
+            >>> db = DB(tables_map={"foo": Table.of(Foo)})
             >>>
             >>> # Create multiple Foo instances
-            >>> foos = [FooORM(id=i, name=f"item_{i}") for i in range(1, 101)]
+            >>> foos = [Foo(id=i, name=f"item_{i}") for i in range(1, 101)]
             >>>
             >>> # Bulk insert for efficient batch processing
-            >>> table = db.table[FooORM]
+            >>> table = db.table[Foo]
             >>> table.bulk_insert(foos)
             >>>
             >>> # Verify all items were inserted

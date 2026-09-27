@@ -6,7 +6,7 @@ This package provides the core database infrastructure for ducktide, including:
 - **Table**: Repository-pattern interface for CRUD operations
 - **Exceptions**: Custom exception hierarchy for database errors
 - **Context**: Context-scoped default database management
-- **ORM Base**: Base classes for ORM model definitions
+- **DomainModel**: Optional frozen base for the Pydantic models tables are built from
 - **Time Series**: Specialized time series data management
 
 The database layer follows a two-database architecture:
@@ -14,12 +14,11 @@ The database layer follows a two-database architecture:
 2. **Time Series Database** (via `TimeSeriesDB`): For high-volume numerical data
 
 Example:
-    >>> from functools import partial
     >>> from ducktide import DB, Table
-    >>> from ducktide.orm.example import FooORM, Foo
+    >>> from ducktide.example import Foo
     >>>
-    >>> # Create database with FooORM table
-    >>> db = DB(tables_map={"foo": partial(Table, model_class=FooORM)})
+    >>> # One model is both the domain object and the table definition
+    >>> db = DB(tables_map={"foo": Table.of(Foo)})
     >>> foo = Foo(id=1, name="example")
     >>> db.insert(foo)
     >>>
@@ -37,9 +36,19 @@ Note:
     on top of this infrastructure.
 """
 
-from . import context, exceptions, orm
+from . import context, exceptions
 from .db import DB
+from .model import DomainModel
 from .table import Table
 from .time import TimeSeriesDB, TimeSeriesModel, TimeSeriesRepository
 
-__all__ = ["DB", "Table", "TimeSeriesDB", "TimeSeriesModel", "TimeSeriesRepository", "context", "exceptions", "orm"]
+__all__ = [
+    "DB",
+    "DomainModel",
+    "Table",
+    "TimeSeriesDB",
+    "TimeSeriesModel",
+    "TimeSeriesRepository",
+    "context",
+    "exceptions",
+]

@@ -46,7 +46,7 @@ class TimeSeriesDB(TimeSeriesQueryMixin, TimeSeriesIngestMixin, TimeSeriesIOMixi
 
     Example:
         # Separate databases for different concerns
-        # metadata_db = DB(tables_map={"foo": partial(Table, model_class=FooORM)})
+        # metadata_db = DB(tables_map={"foo": Table.of(Foo)})
         # ts_db = TimeSeriesDB()
         # ts_db.ingest(Foo.table_name, price_data)
         # df = foo.get_timeseries_frame(ts_db)

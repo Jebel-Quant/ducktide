@@ -50,6 +50,7 @@ with its own exclude list) and they *disagree* about which lines trigger B608:
 """
 
 import re
+from collections.abc import Mapping
 
 from ducktide.exceptions import ValidationError
 
@@ -197,6 +198,30 @@ def create_table_as(table: str, query: str) -> str:
         The create-table-as-select statement.
     """
     return f"CREATE TABLE {table} AS {query}"
+
+
+def create_table_if_not_exists(table: str, columns: Mapping[str, str]) -> str:
+    """Return ``CREATE TABLE IF NOT EXISTS <table> (<column> <definition>, ...)``.
+
+    Table and column names are validated here, because they are derived from a
+    model's class and field names rather than written out by hand. The column
+    definitions are SQL type and constraint text supplied by code.
+
+    Args:
+        table: The table name.
+        columns: Column definitions keyed by column name, in column order.
+
+    Returns:
+        The create-table statement.
+
+    Raises:
+        ValidationError: If the table or any column name is not a valid SQL identifier.
+    """
+    validate_identifier(table, "table name")
+    for column in columns:
+        validate_identifier(column, "column name")
+    body = ",\n    ".join(f"{column} {definition}" for column, definition in columns.items())
+    return f"CREATE TABLE IF NOT EXISTS {table} (\n    {body}\n)"
 
 
 def create_schema_if_not_exists(schema: str) -> str:

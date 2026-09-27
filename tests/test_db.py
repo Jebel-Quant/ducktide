@@ -2,95 +2,22 @@
 
 from __future__ import annotations
 
-from typing import Any, ClassVar
-
 import duckdb
 import pytest
+from pydantic import BaseModel
 
 from ducktide.db import DB
-from ducktide.orm.base import ORMModel
 from ducktide.table import Table
 
 
-class MockORMModel(ORMModel):
-    """A minimal mock ORM model for testing."""
+class Item(BaseModel):
+    """A minimal model backing the test table."""
 
-    _table_name: ClassVar[str] = "test_table"
-    _primary_key: ClassVar[str] = "id"
-    _columns: ClassVar[list[str]] = ["id", "name"]
-    _schema: ClassVar[dict[str, str]] = {"id": "INTEGER PRIMARY KEY", "name": "TEXT"}
-    _domain_model: ClassVar[type | None] = object  # Mock domain model
-
-    def __init__(self, id: int = 1, name: str = "test"):  # noqa: A002 - mirrors the DB primary-key column `id`
-        """Initialize the MockORMModel."""
-        self.id = id
-        self.name = name
-
-    def _to_dict(self) -> dict[str, Any]:
-        """Return the model as a dict (mock)."""
-        return {}
-
-    @classmethod
-    def _from_row(cls, row: tuple[Any, ...]) -> MockORMModel:
-        """Build a model instance from a database row (mock)."""
-        return cls()
-
-    @classmethod
-    def _from_dict(cls, data: dict[str, Any]) -> MockORMModel:
-        """Build a model instance from a dict (mock)."""
-        return cls()
+    id: int = 1
+    name: str = "test"
 
 
-class MockTable(Table):
-    """A minimal mock table for testing."""
-
-    def __init__(self, connection, read_only=False):
-        """Initialize the MockTable.
-
-        :param connection: The database connection.
-        :param read_only: Whether the table is read-only.
-        """
-        super().__init__(connection, MockORMModel, read_only=read_only)
-
-
-class NoDomainORMModel(ORMModel):
-    """A mock ORM model without an associated domain model."""
-
-    _table_name: ClassVar[str] = "no_domain_table"
-    _primary_key: ClassVar[str] = "id"
-    _columns: ClassVar[list[str]] = ["id"]
-    _schema: ClassVar[dict[str, str]] = {"id": "INTEGER PRIMARY KEY"}
-    _domain_model: ClassVar[type | None] = None
-
-    def __init__(self, id: int = 1):  # noqa: A002 - mirrors the DB primary-key column `id`
-        """Initialize the NoDomainORMModel."""
-        self.id = id
-
-    def _to_dict(self) -> dict[str, Any]:
-        """Return the model as a dict (mock)."""
-        return {"id": self.id}
-
-    @classmethod
-    def _from_row(cls, row: tuple[Any, ...]) -> NoDomainORMModel:
-        """Build a model instance from a database row (mock)."""
-        return cls(*row)
-
-    @classmethod
-    def _from_dict(cls, data: dict[str, Any]) -> NoDomainORMModel:
-        """Build a model instance from a dict (mock)."""
-        return cls(id=data["id"])
-
-
-class NoDomainTable(Table):
-    """Table for NoDomainORMModel."""
-
-    def __init__(self, connection, read_only=False):
-        """Initialize the NoDomainTable.
-
-        :param connection: The database connection.
-        :param read_only: Whether the table is read-only.
-        """
-        super().__init__(connection, NoDomainORMModel, read_only=read_only)
+ITEMS = Table.of(Item, name="test_table")
 
 
 class TestDB:
@@ -194,23 +121,15 @@ class TestDB:
             assert len(tables) == 0
 
     def test_initialize_tables_and_model_mapping(self):
-        """Verify that tables are initialized and _model_to_table is populated."""
-        tables_map = {"test_table": MockTable}
-        with DB(tables_map=tables_map) as db:
-            assert hasattr(db, "test_table")
-            assert isinstance(db.test_table, MockTable)
-            # Check model mapping (ORM model)
-            assert db._model_to_table[MockORMModel] == db.test_table
-            # Check model mapping (Domain model)
-            assert db._model_to_table[object] == db.test_table
+        """Verify that tables are initialized and the model maps to its table."""
+        with DB(tables_map={"test_table": ITEMS}) as db:
+            assert isinstance(db.test_table, Table)
+            assert db.table == {Item: db.test_table}
 
     def test_insert_valid_object(self):
         """Test inserting a valid object."""
-        tables_map = {"test_table": MockTable}
-        with DB(tables_map=tables_map) as db:
-            obj = MockORMModel()
-            # This should call table.insert(obj)
-            db.insert(obj)
+        with DB(tables_map={"test_table": ITEMS}) as db:
+            db.insert(Item())
             # Verify insertion (via raw query since we are testing DB.insert)
             res = db.execute_query("SELECT COUNT(*) FROM test_table").fetchone()[0]
             assert res == 1
@@ -219,14 +138,3 @@ class TestDB:
         """Test inserting an object with an unregistered type."""
         with DB(tables_map={}) as db, pytest.raises(TypeError, match="Invalid object type"):
             db.insert("unregistered string object")
-
-    def test_init_tables_without_domain_model(self):
-        """Test that only the ORM class is registered when _domain_model is unset."""
-        with DB(tables_map={"no_domain": NoDomainTable}) as db:
-            assert NoDomainORMModel in db.table
-            # No second (domain-model) key was registered for this table
-            keys = [k for k, v in db.table.items() if v is db.table[NoDomainORMModel]]
-            assert keys == [NoDomainORMModel]
-
-            db.insert(NoDomainORMModel(id=7))
-            assert db.execute_query("SELECT COUNT(*) FROM no_domain_table").fetchone()[0] == 1
