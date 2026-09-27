@@ -18,7 +18,7 @@ import polars as pl
 import pytest
 
 from ducktide.exceptions import ValidationError
-from ducktide.orm.base import DomainModel
+from ducktide.model import DomainModel
 from ducktide.time import TimeSeriesDB
 from ducktide.time.timeseries_model import TimeSeriesModel
 

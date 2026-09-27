@@ -1,27 +1,23 @@
-"""Unit tests for the example.py models (Foo and FooORM).
+"""Unit tests for the example Foo model and the table built from it.
 
-This module tests the example domain model and ORM model that are used
-for demonstration and testing purposes throughout the codebase.
+Foo is both the domain object and the table definition, so the round-trip
+tests check that rows come back as ``Foo`` instances.
 """
 
 from __future__ import annotations
 
-from functools import partial
-
 import pytest
 
 from ducktide.db import DB
-from ducktide.orm.example import Foo, FooORM
+from ducktide.example import Foo
+from ducktide.model import column_definitions
 from ducktide.table import Table
 
 
 @pytest.fixture
 def db():
-    """Provide a fresh in-memory database with FooORM table."""
-    tables_map = {
-        "foo": partial(Table, model_class=FooORM),
-    }
-    with DB(tables_map=tables_map) as db:
+    """Provide a fresh in-memory database with a table for Foo."""
+    with DB(tables_map={"foo": Table.of(Foo)}) as db:
         yield db
 
 
@@ -66,45 +62,14 @@ class TestFoo:
             pass
 
 
-class TestFooORM:
-    """Tests for the FooORM persistence model."""
+class TestFooTable:
+    """Tests for the table derived from Foo."""
 
-    def test_foo_orm_creation(self):
-        """FooORM should be instantiable with basic fields."""
-        foo_orm = FooORM(id=42, name="Persistence")
-        assert foo_orm.id == 42
-        assert foo_orm.name == "Persistence"
+    def test_foo_table_schema(self):
+        """The schema is derived from Foo's fields."""
+        assert column_definitions(Foo) == {"id": "BIGINT PRIMARY KEY", "name": "VARCHAR NOT NULL"}
 
-    def test_foo_orm_from_row(self):
-        """FooORM.from_row should correctly map database row to object."""
-        row = (100, "Mapped")
-        foo = FooORM.from_row(row)
-        assert foo.id == 100
-        assert foo.name == "Mapped"
-
-    def test_foo_orm_schema(self):
-        """FooORM should have correct schema definition."""
-        assert FooORM._schema == {
-            "id": "INTEGER PRIMARY KEY",
-            "name": "TEXT NOT NULL",
-        }
-
-    def test_foo_orm_primary_key(self):
-        """FooORM should have correct primary key defined."""
-        assert FooORM._primary_key == "id"
-
-    def test_foo_orm_domain_model(self):
-        """FooORM should reference the correct domain model class."""
-        assert FooORM._domain_model is Foo
-
-    def test_foo_orm_model_dump(self):
-        """FooORM should correctly serialize to dictionary."""
-        foo_orm = FooORM(id=1, name="Test")
-        d = foo_orm.model_dump()
-        assert d["id"] == 1
-        assert d["name"] == "Test"
-
-    def test_foo_orm_insert_roundtrip(self, db):
+    def test_foo_table_insert_roundtrip(self, db):
         """Insert and fetch Foo via the database table interface."""
         # Insert a Foo domain model
         foo = Foo(id=1, name="Widget")
@@ -114,11 +79,11 @@ class TestFooORM:
         got_list = db.foo.select(where_clause="id = ?", where_params=[1])
         assert len(got_list) == 1
         got = got_list[0]
-        assert got is not None
+        assert type(got) is Foo
         assert got.id == 1
         assert got.name == "Widget"
 
-    def test_foo_orm_insert_multiple(self, db):
+    def test_foo_table_insert_multiple(self, db):
         """Insert multiple Foo instances and query all."""
         db.foo.insert(Foo(id=1, name="Alpha"))
         db.foo.insert(Foo(id=2, name="Beta"))
@@ -131,7 +96,7 @@ class TestFooORM:
         names = {f.name for f in all_foos}
         assert names == {"Alpha", "Beta", "Gamma"}
 
-    def test_foo_orm_select_with_filter(self, db):
+    def test_foo_table_select_with_filter(self, db):
         """Insert multiple and query with where clause."""
         db.foo.insert(Foo(id=1, name="Widget"))
         db.foo.insert(Foo(id=2, name="Gadget"))
@@ -147,20 +112,8 @@ class TestFooORM:
         assert len(gadgets) == 1
         assert gadgets[0].name == "Gadget"
 
-    def test_foo_orm_empty_select(self, db):
+    def test_foo_table_empty_select(self, db):
         """Select from empty table should return empty list."""
         all_foos = db.foo.select()
         assert len(all_foos) == 0
         assert all_foos == []
-
-    def test_foo_orm_inheritance(self):
-        """FooORM should inherit from both ORMModel and Foo."""
-        foo_orm = FooORM(id=1, name="Test")
-
-        # Check it's an instance of Foo (domain model)
-        assert isinstance(foo_orm, Foo)
-
-        # Check it has ORM capabilities
-        assert hasattr(FooORM, "_schema")
-        assert hasattr(FooORM, "_primary_key")
-        assert hasattr(FooORM, "_domain_model")
