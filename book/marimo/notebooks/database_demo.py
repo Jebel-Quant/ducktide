@@ -16,7 +16,7 @@
 
 This notebook demonstrates:
 - Database initialization with DuckDB (ducktide.DB)
-- Creating custom model classes for use with the Table interface
+- Defining a table from a single Pydantic model
 - Repository pattern operations (insert, select, get, delete)
 - Bulk data ingestion and export (CSV/Parquet)
 - Low-level SQL execution
@@ -30,12 +30,11 @@ app = marimo.App(width="medium")
 
 
 with app.setup:
-    from dataclasses import dataclass
     from datetime import date, datetime
-    from typing import ClassVar
 
     import polars as pl
 
+    from ducktide import DomainModel
     from ducktide.db import DB
     from ducktide.table import Table
     from ducktide.time import TimeSeriesDB
@@ -51,8 +50,9 @@ def cell_intro_header():
         # 🗄️ ducktide System Demo
 
         This notebook demonstrates the core database infrastructure in `ducktide`.
-        Unlike the ORM layer, this layer provides more direct control over table definitions
-        and database operations while still following the Repository pattern.
+        A table is defined by one Pydantic model: its fields are the columns, and rows
+        come back as instances of that model. All reads and writes go through the
+        table, following the Repository pattern.
 
         We will cover:
         1. **Core DB & Table**: Defining models and managing tables.
@@ -73,46 +73,21 @@ def cell_section1_header(mo):
 
 @app.cell
 def cell_define_model():
-    """Define the Trade model and TradeTable class."""
+    """Define the Trade model and its table."""
 
-    @dataclass
-    class Trade:
+    class Trade(DomainModel):
         trade_id: int
         symbol: str
         price: float
         quantity: int
         timestamp: datetime
 
-        # Required metadata for ducktide.Table
-        _table_name = "trades"
-        _primary_key = "trade_id"
-        _columns: ClassVar[list[str]] = ["trade_id", "symbol", "price", "quantity", "timestamp"]
-        _schema: ClassVar[dict[str, str]] = {
-            "trade_id": "INTEGER PRIMARY KEY",
-            "symbol": "TEXT NOT NULL",
-            "price": "DOUBLE",
-            "quantity": "INTEGER",
-            "timestamp": "TIMESTAMP",
-        }
+    # The model is the whole definition: column names, types and NOT NULL are
+    # derived from its fields. Only the table name and primary key are stated.
+    trades_table = Table.of(Trade, name="trades", primary_key="trade_id")
 
-        @classmethod
-        def generate_create_table_sql(cls):
-            """Generate SQL for table creation."""
-            fields = ",\n    ".join([f"{k} {v}" for k, v in cls._schema.items()])
-            return f"CREATE TABLE IF NOT EXISTS {cls._table_name} (\n    {fields}\n);"
-
-        @classmethod
-        def from_row(cls, row):
-            """Create instance from database row."""
-            return cls(*row)
-
-    # Create a specialized Table class for our model to use with DB class
-    class TradeTable(Table):
-        def __init__(self, connection, read_only=False):
-            super().__init__(connection, model_class=Trade, read_only=read_only)
-
-    print("✓ Trade model and TradeTable defined.")
-    return Trade, TradeTable
+    print("✓ Trade model and its table defined.")
+    return Trade, trades_table
 
 
 @app.cell(hide_code=True)
@@ -123,11 +98,10 @@ def cell_section2_header(mo):
 
 
 @app.cell
-def cell_init_db(TradeTable):
+def cell_init_db(trades_table):
     """Initialize the database with the custom table."""
-    # ducktide.DB takes a map of {attribute_name: table_cls}
-    # where table_cls is a class that can be initialized with (connection, read_only=...)
-    db = DB(tables_map={"trades": TradeTable}, db_path=":memory:")
+    # ducktide.DB takes a map of {attribute_name: table factory}
+    db = DB(tables_map={"trades": trades_table}, db_path=":memory:")
     print("✓ Database initialized with custom table mapping.")
     return (db,)
 
@@ -154,8 +128,8 @@ def cell_section3_header(mo):
 @app.cell
 def cell_insert_data(db, Trade):
     """Insert sample data into the database."""
-    t1 = Trade(1, "AAPL", 150.0, 10, datetime(2023, 1, 1, 10, 0))
-    t2 = Trade(2, "MSFT", 250.0, 5, datetime(2023, 1, 1, 10, 5))
+    t1 = Trade(trade_id=1, symbol="AAPL", price=150.0, quantity=10, timestamp=datetime(2023, 1, 1, 10, 0))
+    t2 = Trade(trade_id=2, symbol="MSFT", price=250.0, quantity=5, timestamp=datetime(2023, 1, 1, 10, 5))
 
     # Insert via table interface
     db.trades.insert(t1, t2)
@@ -193,7 +167,10 @@ def cell_section4_header(mo):
 @app.cell
 def cell_bulk_insert(db, Trade):
     """Perform bulk insert of many records."""
-    many_trades = [Trade(i, "GOOG", 2800.0 + i, 1, datetime(2023, 1, 1, 11, i)) for i in range(10, 20)]
+    many_trades = [
+        Trade(trade_id=i, symbol="GOOG", price=2800.0 + i, quantity=1, timestamp=datetime(2023, 1, 1, 11, i))
+        for i in range(10, 20)
+    ]
     db.trades.bulk_insert(many_trades)
     print(f"✓ Bulk inserted {len(many_trades)} trades. Total: {len(db.trades)}")
     return (many_trades,)

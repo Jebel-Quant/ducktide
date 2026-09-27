@@ -110,23 +110,21 @@ class QueryMixin(TableBase):
                 ``venue="GLBX"`` or ``expiry_before=date(2026, 1, 1)``.
 
         Returns:
-            list[model_class]: A list of instantiated domain/ORM model objects created via
-                ``model_class.from_row``.
+            list[model]: One instance of the table's model per matching row.
 
         Raises:
             ValidationError: If a keyword filter does not resolve to a column
                 of this table.
 
         Example:
-            >>> from functools import partial
             >>> from ducktide.db import DB
-            >>> from ducktide.orm.example import FooORM
+            >>> from ducktide.example import Foo
             >>> from ducktide.table import Table
             >>>
-            >>> db = DB(tables_map={"foo": partial(Table, model_class=FooORM)})
-            >>> db.insert(FooORM(id=1, name="apple"), FooORM(id=2, name="banana"), FooORM(id=3, name="cherry"))
+            >>> db = DB(tables_map={"foo": Table.of(Foo)})
+            >>> db.insert(Foo(id=1, name="apple"), Foo(id=2, name="banana"), Foo(id=3, name="cherry"))
             >>>
-            >>> table = db.table[FooORM]
+            >>> table = db.table[Foo]
             >>> # Select all items
             >>> all_foos = table.select()
             >>> len(all_foos)
@@ -169,8 +167,7 @@ class QueryMixin(TableBase):
         # fragment by contract. All data values are bound via params below.
         statement = sql.select_ordered(self.table_name, where=combined)
 
-        rows = self.connection.execute(statement, params).fetchall()
-        return [self.model_class.from_row(row) for row in rows]
+        return self._to_models(self.connection.execute(statement, params))
 
     def get_by(self, key: str, value: Any) -> Any:
         """Return a single row from the table by a given key.

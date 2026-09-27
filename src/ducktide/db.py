@@ -24,12 +24,11 @@ class DB:
     database implementations and does not contain any model or table specific logic.
 
     Example:
-        >>> from functools import partial
         >>> from ducktide import DB, Table
-        >>> from ducktide.orm.example import FooORM, Foo
+        >>> from ducktide.example import Foo
         >>>
         >>> # Initialize with a mapping of attribute names to table classes
-        >>> db = DB(tables_map={"foo": partial(Table, model_class=FooORM)})
+        >>> db = DB(tables_map={"foo": Table.of(Foo)})
         >>>
         >>> # Tables are accessible as attributes
         >>> isinstance(db.table[Foo], Table)
@@ -49,17 +48,16 @@ class DB:
         Args:
             tables_map: Mapping of attribute names to table classes
                 to be initialized automatically. These are typically
-                `partial(Table, model_class=ModelORM)`.
+                `Table.of(Model)`.
             db_path: Path to the database file, or ":memory:" for in-memory.
             read_only: If True, open the database in read-only mode.
 
         Example:
-            >>> from functools import partial
             >>> from ducktide.db import DB
-            >>> from ducktide.orm.example import FooORM
+            >>> from ducktide.example import Foo
             >>> from ducktide.table import Table
             >>>
-            >>> db = DB(tables_map={"foo": partial(Table, model_class=FooORM)})
+            >>> db = DB(tables_map={"foo": Table.of(Foo)})
             >>> db.db_path
             ':memory:'
         """
@@ -74,7 +72,7 @@ class DB:
         """Insert one or more objects into their respective tables.
 
         The method automatically routes each object to the correct table based
-        on its type (either domain model or ORM model).
+        on its type.
 
         Args:
             *objs: One or more model instances to be inserted.
@@ -83,15 +81,14 @@ class DB:
             TypeError: If an object's type is not registered in any table.
 
         Example:
-            >>> from functools import partial
             >>> from ducktide.db import DB
-            >>> from ducktide.orm.example import FooORM, Foo
+            >>> from ducktide.example import Foo
             >>> from ducktide.table import Table
             >>>
-            >>> db = DB(tables_map={"foo": partial(Table, model_class=FooORM)})
+            >>> db = DB(tables_map={"foo": Table.of(Foo)})
             >>>
-            >>> # Insert multiple objects (mix of domain and ORM models)
-            >>> db.insert(Foo(id=1, name="apple"), FooORM(id=2, name="banana"))
+            >>> # Insert multiple objects
+            >>> db.insert(Foo(id=1, name="apple"), Foo(id=2, name="banana"))
             >>> len(db.foo.select())
             2
         """
@@ -105,8 +102,8 @@ class DB:
         """Initialize table interfaces as attributes of this database instance.
 
         This is an internal method called during `__init__`. It instantiates
-        each table class and maps both domain and ORM models to the table
-        instance for routing in `insert()`.
+        each table factory and maps its model to the table instance for routing
+        in `insert()`.
 
         Args:
             tables_map: Mapping of attribute names to table classes.
@@ -115,31 +112,25 @@ class DB:
             table = table_cls(self.connection, read_only=self.read_only)
             setattr(self, attr, table)
 
-            # Map domain model and ORM model to the table instance for insert()
-            self._model_to_table[table.model_class] = table
-            if hasattr(table.model_class, "_domain_model") and table.model_class._domain_model:
-                self._model_to_table[table.model_class._domain_model] = table
+            # Map the model to its table so insert() can route objects by type
+            self._model_to_table[table.model] = table
 
     @property
     def table(self) -> dict[type, Any]:
         """Return a mapping of model classes to table instances.
 
-        This allows looking up a table interface by its associated model class
-        (either the domain model or the ORM model).
+        This allows looking up a table interface by its associated model class.
 
         Returns:
             dict[type, Any]: Mapping of model classes to Table instances.
 
         Example:
-            >>> from functools import partial
             >>> from ducktide.db import DB
-            >>> from ducktide.orm.example import FooORM, Foo
+            >>> from ducktide.example import Foo
             >>> from ducktide.table import Table
             >>>
-            >>> db = DB(tables_map={"foo": partial(Table, model_class=FooORM)})
+            >>> db = DB(tables_map={"foo": Table.of(Foo)})
             >>> db.table[Foo] == db.foo
-            True
-            >>> db.table[FooORM] == db.foo
             True
         """
         return self._model_to_table
@@ -186,12 +177,11 @@ class DB:
         """Drop all tables in the database (idempotent).
 
         Example:
-            >>> from functools import partial
             >>> from ducktide.db import DB
-            >>> from ducktide.orm.example import FooORM
+            >>> from ducktide.example import Foo
             >>> from ducktide.table import Table
             >>>
-            >>> db = DB(tables_map={"foo": partial(Table, model_class=FooORM)})
+            >>> db = DB(tables_map={"foo": Table.of(Foo)})
             >>> db.drop_all_tables()
             >>> # No tables left
             >>> db.execute_query("SHOW TABLES").fetchall()

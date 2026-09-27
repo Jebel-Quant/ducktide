@@ -17,12 +17,10 @@ __generated_with = "0.18.4"
 app = marimo.App(width="medium")
 
 with app.setup:
-    from functools import partial
-
     from ducktide import DB, Table
-    from ducktide.orm.example import Foo, FooORM
+    from ducktide.example import Foo
 
-    db = DB(tables_map={"foo": partial(Table, model_class=FooORM)})
+    db = DB(tables_map={"foo": Table.of(Foo)})
 
 
 @app.cell
