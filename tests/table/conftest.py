@@ -27,7 +27,7 @@ class MockModel(ORMModel):
         "expiry": "DATE",
     }
 
-    def __init__(self, id: int, name: str, expiry: date | str | None = None):
+    def __init__(self, id: int, name: str, expiry: date | str | None = None):  # noqa: A002 - mirrors the DB primary-key column `id`
         """Initialize a MockModel instance."""
         self.id = id
         self.name = name

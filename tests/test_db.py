@@ -21,7 +21,7 @@ class MockORMModel(ORMModel):
     _schema: ClassVar[dict[str, str]] = {"id": "INTEGER PRIMARY KEY", "name": "TEXT"}
     _domain_model: ClassVar[type | None] = object  # Mock domain model
 
-    def __init__(self, id: int = 1, name: str = "test"):
+    def __init__(self, id: int = 1, name: str = "test"):  # noqa: A002 - mirrors the DB primary-key column `id`
         """Initialize the MockORMModel."""
         self.id = id
         self.name = name
@@ -62,7 +62,7 @@ class NoDomainORMModel(ORMModel):
     _schema: ClassVar[dict[str, str]] = {"id": "INTEGER PRIMARY KEY"}
     _domain_model: ClassVar[type | None] = None
 
-    def __init__(self, id: int = 1):
+    def __init__(self, id: int = 1):  # noqa: A002 - mirrors the DB primary-key column `id`
         """Initialize the NoDomainORMModel."""
         self.id = id
 

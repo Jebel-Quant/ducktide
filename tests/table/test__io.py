@@ -27,7 +27,7 @@ class MockModelWithDateColumns(ORMModel):
     }
     date_columns: ClassVar[list[str]] = ["created_at"]
 
-    def __init__(self, id: int, name: str, created_at: date | str | None = None):
+    def __init__(self, id: int, name: str, created_at: date | str | None = None):  # noqa: A002 - mirrors the DB primary-key column `id`
         """Initialize a MockModelWithDateColumns instance."""
         self.id = id
         self.name = name
