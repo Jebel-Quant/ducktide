@@ -187,6 +187,31 @@ def insert_from_query(table: str, query: str) -> str:
     return f"INSERT INTO {table} {query}"
 
 
+def insert_columns_from(table: str, columns: str, source: str) -> str:
+    """Return ``INSERT INTO <table> (<columns>) SELECT <columns> FROM <source>``.
+
+    Args:
+        table: A validated table name.
+        columns: A comma-separated list of validated column names.
+        source: A registered relation name (code-derived, not user data).
+
+    Returns:
+        The insert-from-select statement, matching columns by name.
+    """
+    return f"INSERT INTO {table} ({columns}) SELECT {columns} FROM {source}"  # nosec B608  # noqa: S608
+
+
+# Existence of one table or view, matched on (schema, name) across every
+# attached catalog. Both values are bound parameters, so nothing is interpolated.
+TABLE_EXISTS = (
+    "SELECT 1 FROM ("
+    "SELECT schema_name, table_name FROM duckdb_tables() "
+    "UNION ALL "
+    "SELECT schema_name, view_name FROM duckdb_views() WHERE NOT internal"
+    ") WHERE schema_name = ? AND table_name = ? LIMIT 1"
+)
+
+
 def create_table_as(table: str, query: str) -> str:
     """Return ``CREATE TABLE <table> AS <query>``.
 

@@ -20,6 +20,21 @@ class TestTimeSeriesBase:
         assert isinstance(df, pl.DataFrame)
         assert df.to_dicts() == [{"a": 1, "b": 2}]
 
+    def test_has_table_matches_tables_listing(self, ts_db, sample_frame):
+        """has_table agrees with tables() for plain, schema-qualified, view and temp relations."""
+        ts_db.ingest("plain", sample_frame)
+        ts_db.ingest("market.futures", sample_frame)
+        ts_db.con.execute("CREATE VIEW plain_view AS SELECT * FROM plain")
+        ts_db.con.execute("CREATE TEMP TABLE scratch AS SELECT 1 AS x")
+
+        for name in ("plain", "market.futures", "plain_view", "scratch"):
+            assert name in ts_db.tables()
+            assert ts_db.has_table(name)
+
+        for name in ("missing", "market.plain", "other.futures", "futures"):
+            assert name not in ts_db.tables()
+            assert not ts_db.has_table(name)
+
     def test_timeseries_db_tables_and_has_table(self, ts_db, sample_frame):
         """TimeSeriesDB should list tables and check for existence."""
         assert ts_db.tables() == []

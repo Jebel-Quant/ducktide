@@ -2,21 +2,31 @@
 
 from __future__ import annotations
 
+import uuid
 from datetime import date
+from typing import Any
 
+import duckdb
+import polars as pl
 import pytest
+from pydantic import BaseModel
 
 from ducktide.exceptions import QueryError
+from ducktide.table import Table
+from ducktide.table._write import _BULK_SOURCE, _arrow_compatible
 
 from .conftest import MockModel
 
 
-class _FailingExecutemany:
-    """Delegate to a real DuckDB connection but fail every ``executemany``.
+class _FailingInsert:
+    """Delegate to a real DuckDB connection but fail every ``INSERT`` after it has run.
 
     Used to exercise the non-constraint failure path in ``bulk_insert``, where a
-    rollback must still happen. ``begin``, ``rollback`` and every other call pass
-    straight through to the real connection so the transaction is genuine.
+    rollback must still happen. The real statement executes first, so the rows
+    are written inside the open transaction and only a rollback removes them.
+    ``begin``, ``rollback`` and every other call pass straight through to the
+    real connection so the transaction is genuine. Both the frame path
+    (``execute``) and the fallback path (``executemany``) fail.
     """
 
     def __init__(self, inner):
@@ -27,10 +37,51 @@ class _FailingExecutemany:
         """Forward every other attribute to the wrapped connection."""
         return getattr(self._inner, name)
 
-    def executemany(self, *_args, **_kwargs):
-        """Fail with an error that is not a ConstraintException."""
+    def execute(self, statement, *args, **kwargs):
+        """Run the statement, then fail if it was an INSERT."""
+        result = self._inner.execute(statement, *args, **kwargs)
+        if statement.startswith("INSERT"):
+            msg = "connection lost"
+            raise RuntimeError(msg)
+        return result
+
+    def executemany(self, *args, **kwargs):
+        """Run the batch, then fail with an error that is not a ConstraintException."""
+        self._inner.executemany(*args, **kwargs)
         msg = "connection lost"
         raise RuntimeError(msg)
+
+
+def _assert_no_open_transaction(connection):
+    """Fail if a transaction was left open (DuckDB rejects a nested BEGIN)."""
+    connection.begin()
+    connection.rollback()
+
+
+class TokenModel(BaseModel):
+    """A model with a UUID column, which Polars cannot hand to DuckDB via Arrow."""
+
+    id: int
+    token: uuid.UUID
+
+
+class LooseModel(BaseModel):
+    """A model whose untyped field lets one column mix Python types."""
+
+    id: int
+    value: Any
+
+
+@pytest.fixture
+def token_table(connection):
+    """Provide a Table whose rows take the executemany fallback path."""
+    return Table(connection, TokenModel, name="token")
+
+
+@pytest.fixture
+def loose_table(connection):
+    """Provide a Table with a VARCHAR column fed by an untyped field."""
+    return Table(connection, LooseModel, name="loose", sql_types={"value": "VARCHAR"})
 
 
 class TestWriteMixin:
@@ -112,15 +163,96 @@ class TestWriteMixin:
         """
         table.insert(MockModel(id=1, name="existing"))
         real_connection = table.connection
-        monkeypatch.setattr(table, "connection", _FailingExecutemany(real_connection))
+        monkeypatch.setattr(table, "connection", _FailingInsert(real_connection))
 
         with pytest.raises(RuntimeError, match="connection lost"):
             table.bulk_insert([MockModel(id=2, name="b"), MockModel(id=3, name="c")])
 
         monkeypatch.undo()
 
-        # The rollback leaves the connection usable rather than stuck in a
-        # dangling transaction, so a subsequent write still works.
+        # The batch's rows were written before the failure, so only a rollback
+        # removes them; it also closes the transaction rather than leaving it
+        # dangling, so a subsequent write still works.
+        _assert_no_open_transaction(table.connection)
         assert len(table) == 1
         table.insert(MockModel(id=4, name="after"))
         assert len(table) == 2
+
+    def test_bulk_insert_round_trips_values(self, table):
+        """The frame path stores every value, including NULLs and dates, unchanged."""
+        table.bulk_insert(
+            [
+                MockModel(id=1, name="a", expiry=date(2025, 1, 1)),
+                MockModel(id=2, name=None),
+                MockModel(id=3, name="c", expiry=date(2025, 3, 3)),
+            ]
+        )
+
+        rows = table.connection.execute("SELECT id, name, expiry FROM mock_table ORDER BY id").fetchall()
+        assert rows == [(1, "a", date(2025, 1, 1)), (2, None, None), (3, "c", date(2025, 3, 3))]
+
+    def test_bulk_insert_unregisters_source(self, table):
+        """The batch frame is not left registered on the connection, even after a failure."""
+        table.bulk_insert([MockModel(id=1, name="a"), MockModel(id=2, name="b")])
+        with pytest.raises(QueryError):
+            table.bulk_insert([MockModel(id=3, name="c"), MockModel(id=3, name="duplicate")])
+
+        with pytest.raises(duckdb.CatalogException):
+            table.connection.execute(f"SELECT * FROM {_BULK_SOURCE}")  # noqa: S608 - constant relation name
+
+    def test_bulk_insert_falls_back_for_non_arrow_values(self, token_table):
+        """Values Polars cannot hand to DuckDB (UUIDs) go through executemany."""
+        tokens = [uuid.UUID(int=1), uuid.UUID(int=2)]
+        assert token_table._frame_from_values([(1, tokens[0]), (2, tokens[1])]) is None
+
+        token_table.bulk_insert([TokenModel(id=1, token=tokens[0]), TokenModel(id=2, token=tokens[1])])
+        assert [t.token for t in token_table.select()] == tokens
+
+    def test_bulk_insert_falls_back_for_mixed_types(self, loose_table):
+        """A column mixing incompatible Python types falls back and is cast by DuckDB."""
+        assert loose_table._frame_from_values([(1, 7), (2, "b")]) is None
+
+        loose_table.bulk_insert([LooseModel(id=1, value=7), LooseModel(id=2, value="b")])
+        assert [m.value for m in loose_table.select()] == ["7", "b"]
+
+    def test_bulk_insert_fallback_is_atomic(self, token_table):
+        """The executemany fallback keeps the all-or-nothing guarantee."""
+        token_table.insert(TokenModel(id=1, token=uuid.UUID(int=1)))
+        with pytest.raises(QueryError, match="Constraint violation inserting into 'token'"):
+            token_table.bulk_insert(
+                [TokenModel(id=2, token=uuid.UUID(int=2)), TokenModel(id=1, token=uuid.UUID(int=3))]
+            )
+        assert len(token_table) == 1
+
+    def test_bulk_insert_fallback_rolls_back_on_non_constraint_error(self, token_table, monkeypatch):
+        """A non-constraint failure on the fallback path also rolls back."""
+        monkeypatch.setattr(token_table, "connection", _FailingInsert(token_table.connection))
+        with pytest.raises(RuntimeError, match="connection lost"):
+            token_table.bulk_insert(
+                [TokenModel(id=1, token=uuid.UUID(int=1)), TokenModel(id=2, token=uuid.UUID(int=2))]
+            )
+        monkeypatch.undo()
+
+        _assert_no_open_transaction(token_table.connection)
+        assert len(token_table) == 0
+        token_table.insert(TokenModel(id=3, token=uuid.UUID(int=3)))
+        assert len(token_table) == 1
+
+
+@pytest.mark.parametrize(
+    ("dtype", "expected"),
+    [
+        (pl.Int64(), True),
+        (pl.List(pl.Utf8()), True),
+        (pl.Struct({"a": pl.Date()}), True),
+        (pl.Object(), False),
+        (pl.Int128(), False),
+        (pl.UInt128(), False),
+        (pl.List(pl.Int128()), False),
+        (pl.Array(pl.Int128(), 2), False),
+        (pl.Struct({"a": pl.Int64(), "b": pl.List(pl.UInt128())}), False),
+    ],
+)
+def test_arrow_compatible(dtype, expected):
+    """Dtypes DuckDB cannot read over Arrow are rejected, however deeply nested."""
+    assert _arrow_compatible(dtype) is expected

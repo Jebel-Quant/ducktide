@@ -126,7 +126,10 @@ class TimeSeriesBase:
         Returns:
             True if the table exists, False otherwise.
         """
-        return table in self.tables()
+        # A targeted catalog lookup: listing every table (``SHOW ALL TABLES``)
+        # costs more than the typical point query it guards.
+        schema, _, name = table.rpartition(".")
+        return self.con.execute(sql.TABLE_EXISTS, [schema or "main", name]).fetchone() is not None
 
     def __enter__(self) -> Self:
         """Enter the runtime context related to this object."""

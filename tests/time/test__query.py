@@ -59,13 +59,35 @@ class TestTimeSeriesQueryMixin:
             with pytest.raises(QueryError, match="fail_table"):
                 ts_db.get_timeseries_frame("fail_table")
 
-        # A table without the expected time column should also raise (sort fails),
+        # A table without the expected time column should also raise (ORDER BY fails),
         # not silently return an empty frame
         ts_db.con.execute("CREATE TABLE bad_table (id INTEGER)")
         ts_db.con.execute("INSERT INTO bad_table VALUES (1)")
 
         with pytest.raises(QueryError, match="bad_table"):
             ts_db.get_timeseries_frame("bad_table")
+
+    def test_get_timeseries_frame_is_sorted_and_flagged(self, ts_db):
+        """Rows come back in time order, nulls first, with Polars' sorted flag set.
+
+        The order comes from the query's ORDER BY rather than a second sort in
+        Polars, so this pins the null placement and the flag that
+        ``.sort()`` used to provide.
+        """
+        ts_db.ingest(
+            "unordered",
+            pl.DataFrame(
+                {
+                    "timestamp": [date(2025, 1, 3), None, date(2025, 1, 1), date(2025, 1, 2)],
+                    "instrument_id": [1, 1, 1, 1],
+                }
+            ),
+        )
+
+        frame = ts_db.get_timeseries_frame("unordered")
+
+        assert frame["timestamp"].to_list() == [None, date(2025, 1, 1), date(2025, 1, 2), date(2025, 1, 3)]
+        assert frame["timestamp"].flags["SORTED_ASC"]
 
     def test_timeseries_db_query_error_can_be_handled(self, ts_db):
         """Pipelines that prefer graceful degradation can catch QueryError explicitly."""

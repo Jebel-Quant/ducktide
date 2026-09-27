@@ -1,18 +1,45 @@
 """Write-side operations (insert / bulk insert) for the table interface.
 
 This module defines :class:`WriteMixin`, which turns model instances into
-parameterized ``INSERT`` statements, delegating multi-row inserts to DuckDB's
-batch ``executemany`` for efficiency.
+parameterized ``INSERT`` statements. Multi-row inserts go through a Polars
+frame and a single ``INSERT ... SELECT``; DuckDB's ``executemany`` runs one
+statement per row, which is orders of magnitude slower.
 """
 
 from collections.abc import Iterable
 from typing import Any
 
 import duckdb
+import polars as pl
+from polars.datatypes import DataTypeClass
 
 from ..exceptions import QueryError
 from ..utils import sql
 from ._base import TableBase
+
+# Name under which a bulk-insert batch is registered on the connection for the
+# duration of one ``INSERT ... SELECT``.
+_BULK_SOURCE = "__ducktide_bulk_insert"
+
+# Polars dtypes that do not survive the Arrow handoff to DuckDB: ``Object`` has
+# no Arrow equivalent and 128-bit integers are rejected by DuckDB's reader.
+_NON_ARROW_DTYPES = (pl.Object, pl.Int128, pl.UInt128)
+
+
+def _arrow_compatible(dtype: pl.DataType | DataTypeClass) -> bool:
+    """Return True if ``dtype``, including any nested dtypes, reaches DuckDB intact.
+
+    Args:
+        dtype: A Polars column dtype.
+
+    Returns:
+        False if the dtype or anything nested in it is one of ``_NON_ARROW_DTYPES``.
+    """
+    if isinstance(dtype, pl.Struct):
+        return all(_arrow_compatible(field.dtype) for field in dtype.fields)
+    if isinstance(dtype, pl.List | pl.Array):
+        return _arrow_compatible(dtype.inner)
+    return not any(dtype == bad for bad in _NON_ARROW_DTYPES)
 
 
 class WriteMixin(TableBase):
@@ -76,9 +103,9 @@ class WriteMixin(TableBase):
     def bulk_insert(self, objs: Iterable[Any]) -> None:
         """Insert multiple objects into the table in one efficient operation.
 
-        This method is optimized for inserting many records at once, using
-        DuckDB's executemany() for batch processing. It's significantly faster
-        than calling insert() in a loop for large datasets.
+        The rows are gathered into a Polars DataFrame and written with a
+        single ``INSERT ... SELECT``, so the cost is dominated by building the
+        frame rather than by per-row statement execution.
 
         Args:
             objs: An iterable of model instances whose attributes map to the
@@ -108,9 +135,9 @@ class WriteMixin(TableBase):
                 remain in the table.
 
         Performance:
-            For inserting 1000+ records, bulk_insert() can be 10-100x faster
-            than individual insert() calls due to reduced SQL parsing and
-            transaction overhead.
+            Values Polars cannot hand to DuckDB (e.g. UUIDs, ints beyond 64
+            bits, or a column mixing incompatible types) fall back to
+            ``executemany``, which is correct but runs one statement per row.
 
         Atomicity:
             The whole batch is wrapped in an explicit transaction. DuckDB
@@ -123,23 +150,43 @@ class WriteMixin(TableBase):
         if not objs:
             return
 
-        placeholders = ", ".join("?" for _ in self.columns)
         cols = ", ".join(self.columns)
-
-        # table_name and column names come from the ORM model class definition
-        # (code, not user data); row values are bound via placeholders.
-        statement = sql.insert_row(self.table_name, cols, placeholders)
-
         values = [self._values_from_obj(obj) for obj in objs]
+        frame = self._frame_from_values(values)
+
         self.connection.begin()
         try:
-            self.connection.executemany(statement, values)
+            if frame is None:
+                placeholders = ", ".join("?" for _ in self.columns)
+                self.connection.executemany(sql.insert_row(self.table_name, cols, placeholders), values)
+            else:
+                self.connection.register(_BULK_SOURCE, frame)
+                try:
+                    self.connection.execute(sql.insert_columns_from(self.table_name, cols, _BULK_SOURCE))
+                finally:
+                    self.connection.unregister(_BULK_SOURCE)
         except duckdb.ConstraintException as exc:
             self.connection.rollback()
             raise QueryError(f"Constraint violation inserting into '{self.table_name}': {exc}") from exc  # noqa: TRY003
         except Exception:
-            # Any other failure must not leave the transaction open on a
-            # long-lived connection; re-raise unchanged once rolled back.
             self.connection.rollback()
             raise
         self.connection.commit()
+
+    def _frame_from_values(self, values: list[tuple[Any, ...]]) -> pl.DataFrame | None:
+        """Build a column-wise DataFrame from row tuples, if Polars can hold them.
+
+        Args:
+            values: Row tuples in ``self.columns`` order.
+
+        Returns:
+            The DataFrame, or None when a column has values Polars cannot
+            represent in a form DuckDB can read (inference fails, or yields a
+            dtype in ``_NON_ARROW_DTYPES``).
+        """
+        data = {col: [row[i] for row in values] for i, col in enumerate(self.columns)}
+        try:
+            frame = pl.DataFrame(data, strict=True)
+        except (TypeError, ValueError, OverflowError, pl.exceptions.PolarsError):
+            return None
+        return frame if all(_arrow_compatible(dtype) for dtype in frame.dtypes) else None
