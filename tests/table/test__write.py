@@ -4,14 +4,14 @@ from __future__ import annotations
 
 import uuid
 from datetime import date
-from typing import Any, ClassVar
+from typing import Any
 
 import duckdb
 import polars as pl
 import pytest
+from pydantic import BaseModel
 
 from ducktide.exceptions import QueryError
-from ducktide.orm.base import ORMModel
 from ducktide.table import Table
 from ducktide.table._write import _BULK_SOURCE, _arrow_compatible
 
@@ -58,27 +58,30 @@ def _assert_no_open_transaction(connection):
     connection.rollback()
 
 
-class TokenModel(ORMModel):
+class TokenModel(BaseModel):
     """A model with a UUID column, which Polars cannot hand to DuckDB via Arrow."""
 
-    _table_name: ClassVar[str] = "token"
-    _schema: ClassVar[dict[str, str]] = {"id": "INTEGER PRIMARY KEY", "token": "UUID"}
+    id: int
+    token: uuid.UUID
 
-    def __init__(self, id: int, token: uuid.UUID):  # noqa: A002 - mirrors the DB primary-key column `id`
-        """Initialize a TokenModel instance."""
-        self.id = id
-        self.token = token
 
-    @classmethod
-    def from_row(cls, row: tuple[Any, ...]) -> TokenModel:
-        """Create a TokenModel from a database row."""
-        return cls(*row)
+class LooseModel(BaseModel):
+    """A model whose untyped field lets one column mix Python types."""
+
+    id: int
+    value: Any
 
 
 @pytest.fixture
 def token_table(connection):
     """Provide a Table whose rows take the executemany fallback path."""
-    return Table(connection=connection, model_class=TokenModel)
+    return Table(connection, TokenModel, name="token")
+
+
+@pytest.fixture
+def loose_table(connection):
+    """Provide a Table with a VARCHAR column fed by an untyped field."""
+    return Table(connection, LooseModel, name="loose", sql_types={"value": "VARCHAR"})
 
 
 class TestWriteMixin:
@@ -178,7 +181,11 @@ class TestWriteMixin:
     def test_bulk_insert_round_trips_values(self, table):
         """The frame path stores every value, including NULLs and dates, unchanged."""
         table.bulk_insert(
-            [MockModel(1, "a", date(2025, 1, 1)), MockModel(2, None), MockModel(3, "c", date(2025, 3, 3))]
+            [
+                MockModel(id=1, name="a", expiry=date(2025, 1, 1)),
+                MockModel(id=2, name=None),
+                MockModel(id=3, name="c", expiry=date(2025, 3, 3)),
+            ]
         )
 
         rows = table.connection.execute("SELECT id, name, expiry FROM mock_table ORDER BY id").fetchall()
@@ -186,9 +193,9 @@ class TestWriteMixin:
 
     def test_bulk_insert_unregisters_source(self, table):
         """The batch frame is not left registered on the connection, even after a failure."""
-        table.bulk_insert([MockModel(1, "a"), MockModel(2, "b")])
+        table.bulk_insert([MockModel(id=1, name="a"), MockModel(id=2, name="b")])
         with pytest.raises(QueryError):
-            table.bulk_insert([MockModel(3, "c"), MockModel(3, "duplicate")])
+            table.bulk_insert([MockModel(id=3, name="c"), MockModel(id=3, name="duplicate")])
 
         with pytest.raises(duckdb.CatalogException):
             table.connection.execute(f"SELECT * FROM {_BULK_SOURCE}")  # noqa: S608 - constant relation name
@@ -198,33 +205,37 @@ class TestWriteMixin:
         tokens = [uuid.UUID(int=1), uuid.UUID(int=2)]
         assert token_table._frame_from_values([(1, tokens[0]), (2, tokens[1])]) is None
 
-        token_table.bulk_insert([TokenModel(1, tokens[0]), TokenModel(2, tokens[1])])
+        token_table.bulk_insert([TokenModel(id=1, token=tokens[0]), TokenModel(id=2, token=tokens[1])])
         assert [t.token for t in token_table.select()] == tokens
 
-    def test_bulk_insert_falls_back_for_mixed_types(self, table):
+    def test_bulk_insert_falls_back_for_mixed_types(self, loose_table):
         """A column mixing incompatible Python types falls back and is cast by DuckDB."""
-        assert table._frame_from_values([(1, 7, None), (2, "b", None)]) is None
+        assert loose_table._frame_from_values([(1, 7), (2, "b")]) is None
 
-        table.bulk_insert([MockModel(1, 7), MockModel(2, "b")])  # type: ignore[arg-type]
-        assert [m.name for m in table.select()] == ["7", "b"]
+        loose_table.bulk_insert([LooseModel(id=1, value=7), LooseModel(id=2, value="b")])
+        assert [m.value for m in loose_table.select()] == ["7", "b"]
 
     def test_bulk_insert_fallback_is_atomic(self, token_table):
         """The executemany fallback keeps the all-or-nothing guarantee."""
-        token_table.insert(TokenModel(1, uuid.UUID(int=1)))
+        token_table.insert(TokenModel(id=1, token=uuid.UUID(int=1)))
         with pytest.raises(QueryError, match="Constraint violation inserting into 'token'"):
-            token_table.bulk_insert([TokenModel(2, uuid.UUID(int=2)), TokenModel(1, uuid.UUID(int=3))])
+            token_table.bulk_insert(
+                [TokenModel(id=2, token=uuid.UUID(int=2)), TokenModel(id=1, token=uuid.UUID(int=3))]
+            )
         assert len(token_table) == 1
 
     def test_bulk_insert_fallback_rolls_back_on_non_constraint_error(self, token_table, monkeypatch):
         """A non-constraint failure on the fallback path also rolls back."""
         monkeypatch.setattr(token_table, "connection", _FailingInsert(token_table.connection))
         with pytest.raises(RuntimeError, match="connection lost"):
-            token_table.bulk_insert([TokenModel(1, uuid.UUID(int=1)), TokenModel(2, uuid.UUID(int=2))])
+            token_table.bulk_insert(
+                [TokenModel(id=1, token=uuid.UUID(int=1)), TokenModel(id=2, token=uuid.UUID(int=2))]
+            )
         monkeypatch.undo()
 
         _assert_no_open_transaction(token_table.connection)
         assert len(token_table) == 0
-        token_table.insert(TokenModel(3, uuid.UUID(int=3)))
+        token_table.insert(TokenModel(id=3, token=uuid.UUID(int=3)))
         assert len(token_table) == 1
 
 
