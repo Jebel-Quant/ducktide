@@ -69,28 +69,14 @@ def test_quote_identifier_rejects_invalid_identifier_before_quoting() -> None:
 # ── the builders that interpolate a raw column/schema identifier ──────────────
 
 
-def test_select_max_per_instrument_rejects_bad_time_col() -> None:
-    """A malicious ``time_col`` is rejected before interpolation."""
-    with pytest.raises(ValidationError):
-        sql.select_max_per_instrument("t", "ts) ; DROP TABLE x --")
-
-
-def test_select_coalesce_max_rejects_bad_time_col() -> None:
-    """A malicious ``time_col`` is rejected before interpolation."""
-    with pytest.raises(ValidationError):
-        sql.select_coalesce_max("t", "ts) ; DROP TABLE x --")
-
-
 def test_create_schema_rejects_bad_schema() -> None:
     """A malicious ``schema`` is rejected before interpolation."""
     with pytest.raises(ValidationError):
         sql.create_schema_if_not_exists("s; DROP SCHEMA y")
 
 
-def test_valid_time_col_builders_roundtrip() -> None:
+def test_valid_schema_builder_roundtrip() -> None:
     """Valid identifiers still produce the expected SQL text."""
-    assert sql.select_max_per_instrument("tbl", "ts").startswith("SELECT instrument_id, MAX(ts)")
-    assert sql.select_coalesce_max("tbl", "ts").startswith("SELECT COALESCE(MAX(ts)")
     assert sql.create_schema_if_not_exists("analytics") == "CREATE SCHEMA IF NOT EXISTS analytics"
 
 
@@ -106,3 +92,26 @@ def test_create_table_if_not_exists_rejects_bad_identifiers() -> None:
         sql.create_table_if_not_exists("t; DROP TABLE x", {"id": "BIGINT"})
     with pytest.raises(ValidationError, match="column name"):
         sql.create_table_if_not_exists("t", {"id); DROP TABLE x; --": "BIGINT"})
+
+
+def test_quote_column_escapes_embedded_quotes() -> None:
+    """Any column name becomes exactly one quoted identifier."""
+    assert sql.quote_column("close") == '"close"'
+    assert sql.quote_column('a"; DROP TABLE x --') == '"a""; DROP TABLE x --"'
+
+
+def test_merge_upsert_names_every_column() -> None:
+    """Matched rows update the non-key columns; unmatched rows insert all columns by name."""
+    statement = sql.merge_upsert('"prices"', "src", ["id", "ts"], ["close", "ts", "id"], update=True)
+    assert statement == (
+        'MERGE INTO "prices" AS t USING src AS s ON (t."id" IS NOT DISTINCT FROM s."id" '
+        'AND t."ts" IS NOT DISTINCT FROM s."ts") '
+        'WHEN MATCHED THEN UPDATE SET "close" = s."close" '
+        'WHEN NOT MATCHED THEN INSERT ("close", "ts", "id") VALUES (s."close", s."ts", s."id")'
+    )
+
+
+def test_merge_upsert_without_update_only_inserts() -> None:
+    """With update=False, or no non-key columns, matched rows are left alone."""
+    assert "WHEN MATCHED" not in sql.merge_upsert("t", "s", ["ts"], ["ts", "v"], update=False)
+    assert "WHEN MATCHED" not in sql.merge_upsert("t", "s", ["ts"], ["ts"], update=True)

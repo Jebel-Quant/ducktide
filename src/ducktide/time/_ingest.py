@@ -1,39 +1,63 @@
-"""Ingestion (append-only) for the time-series interface.
+"""Ingestion (upsert on a series key) for the time-series interface.
 
 This module defines :class:`TimeSeriesIngestMixin`, which creates tables on
-first write and appends only rows newer than the current maximum timestamp
-(per-instrument when an ``instrument_id`` column is present, else globally),
-avoiding duplicate observations.
+first write and afterwards upserts: an incoming row whose key (the series
+columns plus the timestamp) is already stored replaces it, and any other row is
+inserted, whatever its timestamp. Re-ingesting an overlapping frame is safe,
+and late-arriving rows and corrections land instead of being dropped.
 """
 
 import logging
+from collections.abc import Sequence
+from typing import Literal
 
 import polars as pl
 
+from ..exceptions import ValidationError
 from ..utils import sql
 from ._base import TimeSeriesBase
 
 logger = logging.getLogger(__name__)
 
+# The series column used when ``ingest`` is not given a key and the frame has it.
+_DEFAULT_SERIES_COL = "instrument_id"
+# Name under which the incoming batch is registered for one MERGE.
+_INGEST_SOURCE = "__ducktide_ingest"
+
 
 class TimeSeriesIngestMixin(TimeSeriesBase):
-    """Table creation and append-only ingestion for time-series data."""
+    """Table creation and keyed upsert ingestion for time-series data."""
 
-    def ingest(self, table: str, frame: pl.DataFrame) -> None:
+    def ingest(
+        self,
+        table: str,
+        frame: pl.DataFrame,
+        *,
+        key: Sequence[str] | None = None,
+        on_conflict: Literal["update", "ignore"] = "update",
+    ) -> None:
         """Ingest time series data from a Polars DataFrame into a table.
 
-        Automatically creates the table if it doesn't exist, using the schema
-        inferred from the DataFrame. When appending to an existing table, only
-        new rows (timestamp strictly greater than existing max timestamp) are
-        inserted to avoid duplicates.
+        Creates the table from the frame's schema if it doesn't exist.
+        Otherwise the frame is upserted on its key: the series columns plus the
+        timestamp column. A row whose key is already stored replaces the stored
+        row (or is skipped, with ``on_conflict="ignore"``); every other row is
+        inserted, including rows older than what is already stored.
 
         Args:
             table: Name of the destination table. May be schema-qualified as
                 "schema.table". If a schema is specified and doesn't exist, it
                 will be created automatically.
             frame: Polars DataFrame containing the data to ingest. Must include
-                a timestamp column (default name: "timestamp"). The DataFrame
-                schema will be used to create the table if it doesn't exist.
+                the timestamp column (default name: "timestamp") and the key
+                columns. Columns are matched to the table by name.
+            key: Columns identifying one series, e.g. ``["instrument_id"]`` or
+                ``["base", "quote"]``; the timestamp column is added
+                automatically. Defaults to ``["instrument_id"]`` when the frame
+                has that column, else to no series columns (one series).
+            on_conflict: ``"update"`` (default) overwrites a stored row with the
+                incoming one, so corrections land; ``"ignore"`` keeps the stored
+                row and only inserts rows with new keys.
 
         Examples:
             >>> import polars as pl
@@ -41,47 +65,77 @@ class TimeSeriesIngestMixin(TimeSeriesBase):
             >>> from datetime import datetime
             >>>
             >>> ts_db = TimeSeriesDB()
+            >>> bar = {"timestamp": [datetime(2025, 1, 1, 9, 0)], "instrument_id": [100]}
             >>>
-            >>> # Create sample OHLCV data
-            >>> df = pl.DataFrame({
-            ...     'timestamp': [datetime(2025, 1, 1, 9, 0)],
-            ...     'instrument_id': [100],
-            ...     'open': [100.0],
-            ...     'high': [105.0],
-            ...     'low': [99.0],
-            ...     'close': [103.0],
-            ...     'volume': [1000]
-            ... })
+            >>> ts_db.ingest("future", pl.DataFrame({**bar, "close": [103.0]}))
+            >>> ts_db.ingest("future", pl.DataFrame({**bar, "close": [104.0]}))  # a correction
+            >>> ts_db.get_timeseries_frame("future")["close"].to_list()
+            [104.0]
             >>>
-            >>> # Ingest into 'future' table
-            >>> ts_db.ingest("future", df)
-            >>>
-            >>> # Ingest into schema-qualified table
-            >>> ts_db.ingest("market_data.futures", df)
+            >>> # Schema-qualified tables and custom keys work the same way
+            >>> fx = pl.DataFrame(
+            ...     {"timestamp": [datetime(2025, 1, 1)], "base": ["EUR"], "quote": ["USD"], "rate": [1.1]}
+            ... )
+            >>> ts_db.ingest("market_data.fx", fx, key=["base", "quote"])
 
         Raises:
-            ValidationError: If the table name is not a valid SQL identifier.
+            ValidationError: If the table name is not a valid SQL identifier, a
+                key or timestamp column is missing from the frame, or
+                ``on_conflict`` is not ``"update"`` or ``"ignore"``.
 
         Note:
-            - The function uses the timestamp column specified during TimeSeriesDB
-              initialization (default: "timestamp").
-            - When appending, only rows with timestamps strictly greater than the
-              current maximum are inserted, preventing duplicate data.
-            - Table creation is automatic and uses DuckDB's schema inference from
-              the Polars DataFrame.
+            Within one frame, the last row for a key wins. Key columns compare
+            with ``IS NOT DISTINCT FROM``, so a NULL key matches a stored NULL
+            key instead of inserting a duplicate.
         """
         self._validate_table_name(table)
+        if on_conflict not in ("update", "ignore"):
+            raise ValidationError(f"on_conflict must be 'update' or 'ignore', got {on_conflict!r}")  # noqa: TRY003
+        key_cols = self._key_columns(frame, key)
+        frame = frame.unique(subset=key_cols, keep="last", maintain_order=True)
         self._ensure_schema(table)
 
-        # Create table if missing, otherwise append only new rows.
         if not self.has_table(table):
             self._create_table_from_frame(table, frame)
             return
+        if frame.height == 0:
+            return
 
-        if "instrument_id" in frame.columns:
-            self._append_new_per_instrument(table, frame)
+        logger.info("Upserting %d rows into '%s' on %s...", frame.height, table, key_cols)
+        statement = sql.merge_upsert(
+            self._quote_identifier(table), _INGEST_SOURCE, key_cols, frame.columns, update=on_conflict == "update"
+        )
+        self.con.register(_INGEST_SOURCE, frame)
+        try:
+            self.con.execute(statement)
+        finally:
+            self.con.unregister(_INGEST_SOURCE)
+
+    def _key_columns(self, frame: pl.DataFrame, key: Sequence[str] | None) -> list[str]:
+        """Resolve the full upsert key: the series columns plus the timestamp column.
+
+        Args:
+            frame: The incoming DataFrame.
+            key: The caller's series columns, or None for the default.
+
+        Returns:
+            The key columns, series columns first, timestamp last.
+
+        Raises:
+            ValidationError: If the timestamp column or a key column is missing
+                from the frame, or ``key`` repeats a column.
+        """
+        if key is None:
+            series = [_DEFAULT_SERIES_COL] if _DEFAULT_SERIES_COL in frame.columns else []
         else:
-            self._append_new_global(table, frame)
+            series = [col for col in key if col != self.time_col]
+        key_cols = [*series, self.time_col]
+        if len(set(key_cols)) != len(key_cols):
+            raise ValidationError(f"key repeats a column: {list(key or [])}")  # noqa: TRY003
+        missing = [col for col in key_cols if col not in frame.columns]
+        if missing:
+            raise ValidationError(f"frame is missing key column(s): {', '.join(missing)}")  # noqa: TRY003
+        return key_cols
 
     def _ensure_schema(self, table: str) -> None:
         """Create the table's schema if the name is schema-qualified.
@@ -114,91 +168,3 @@ class TimeSeriesIngestMixin(TimeSeriesBase):
         quoted_table = self._quote_identifier(table)
         self.con.execute(sql.create_table_as(quoted_table, sql.select_all("temp_ingest")))
         self.con.unregister("temp_ingest")
-
-    def _append_new_per_instrument(self, table: str, frame: pl.DataFrame) -> None:
-        """Append rows newer than each instrument's current max timestamp.
-
-        Uses the per-instrument max timestamp from the database to filter the
-        incoming frame before ingestion, avoiding an expensive
-        ``WHERE NOT EXISTS`` subquery for every row.
-
-        Args:
-            table: The destination table name.
-            frame: The DataFrame to append (must contain ``instrument_id``).
-        """
-        logger.info("Ingesting %d rows into '%s'...", len(frame), table)
-
-        # quoted_table is produced by _quote_identifier from a name already
-        # validated by _validate_table_name, and time_col is the configured
-        # column name; no user data is interpolated.
-        quoted_table = self._quote_identifier(table)
-        max_ts_df = self.con.execute(sql.select_max_per_instrument(quoted_table, self.time_col)).pl()
-        new_frame = self._filter_new_per_instrument(frame, max_ts_df)
-
-        if new_frame.height > 0:
-            logger.info("Appending %d new rows to '%s'...", len(new_frame), table)
-            self._append(table, new_frame)
-        else:
-            logger.info("No new rows to append to '%s'.", table)
-
-    def _filter_new_per_instrument(self, frame: pl.DataFrame, max_ts_df: pl.DataFrame) -> pl.DataFrame:
-        """Return only the rows newer than the existing per-instrument maxima.
-
-        Args:
-            frame: The incoming DataFrame to filter.
-            max_ts_df: Existing max timestamps per instrument (column ``max_ts``).
-
-        Returns:
-            The subset of ``frame`` with timestamps strictly greater than the
-            existing maximum (or with no existing data for that instrument).
-        """
-        if max_ts_df.height == 0:
-            return frame
-
-        # Join and filter in Polars (usually faster than complex SQL anti-joins
-        # in this context). Ensure time zones match for comparison if we have
-        # a timezone-aware Datetime column.
-        dtype = frame.schema[self.time_col]
-        if isinstance(dtype, pl.Datetime) and dtype.time_zone:
-            max_ts_df = max_ts_df.with_columns(pl.col("max_ts").dt.convert_time_zone(dtype.time_zone))
-
-        return (
-            frame.join(max_ts_df, on="instrument_id", how="left")
-            .filter((pl.col("max_ts").is_null()) | (pl.col(self.time_col) > pl.col("max_ts")))
-            .drop("max_ts")
-        )
-
-    def _append_new_global(self, table: str, frame: pl.DataFrame) -> None:
-        """Append rows newer than the table's single global max timestamp.
-
-        Used when the frame has no ``instrument_id`` column.
-
-        Args:
-            table: The destination table name.
-            frame: The DataFrame to append.
-
-        Note:
-            ``quoted_table`` is ``_quote_identifier`` output from a validated
-            name and ``time_col`` is the configured column name; the
-            ``'1970-01-01'`` epoch is a fixed literal.
-        """
-        quoted_table = self._quote_identifier(table)
-        result = self.con.execute(sql.select_coalesce_max(quoted_table, self.time_col)).fetchone()
-        max_ts = result[0] if result else "1970-01-01"
-        new = frame.filter(pl.col(f"{self.time_col}") > max_ts)
-        if new.height:
-            self._append(table, new)
-
-    def _append(self, table: str, df: pl.DataFrame) -> None:
-        """Append rows from a DataFrame to an existing table.
-
-        Args:
-            table: The destination table name.
-            df: The Polars DataFrame containing rows to append.
-        """
-        quoted_table = self._quote_identifier(table)
-        self.con.register("temp", df)
-        # quoted_table is _quote_identifier output from a validated name; data
-        # rows come from the registered temp relation, not string interpolation.
-        self.con.execute(sql.insert_from_query(quoted_table, sql.select_all("temp")))
-        self.con.unregister("temp")
