@@ -5,6 +5,7 @@
 #     "ducktide",
 #     "duckdb",
 #     "polars",
+#     "numpy",
 # ]
 #
 # [tool.uv.sources]
