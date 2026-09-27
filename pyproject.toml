@@ -77,3 +77,7 @@ fail_under = 100
 [tool.deptry.per_rule_ignores]
 # pyarrow is never imported: DuckDB needs it at runtime to hand results to Polars (`.pl()`).
 DEP002 = ["pyarrow"]
+
+[tool.rhiza-task]
+# Match [tool.coverage.report] fail_under; the task's default of 90 overrides it on the CLI.
+coverage-fail-under = 100
