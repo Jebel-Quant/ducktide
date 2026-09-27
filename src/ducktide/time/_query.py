@@ -84,7 +84,9 @@ class TimeSeriesQueryMixin(TimeSeriesBase):
 
         try:
             query, params = self._build_query(table, instrument_id, start, end)
-            frame = self.con.execute(query, params).pl().sort(self.time_col)
+            # The query's ORDER BY already sorts the rows; flag the column as
+            # sorted for Polars (as .sort() would) rather than sorting again.
+            frame = self.con.execute(query, params).pl().set_sorted(self.time_col)
             frame = self._apply_timezone(frame, timezone)
 
         except Exception as exc:
@@ -159,5 +161,7 @@ class TimeSeriesQueryMixin(TimeSeriesBase):
         # _IDENTIFIER_RE) before this method is called, and time_col is the
         # configured column name (code, not user data). All filter values
         # (instrument_id, start, end) are bound via params.
-        query = sql.select_ordered(table, where=where, order_by=f"{self.time_col} ASC")
+        # NULLS FIRST matches Polars' sort order, which the sorted flag set on
+        # the result assumes.
+        query = sql.select_ordered(table, where=where, order_by=f"{self.time_col} ASC NULLS FIRST")
         return query, params
