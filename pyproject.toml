@@ -82,3 +82,9 @@ DEP002 = ["pyarrow"]
 # Match [tool.coverage.report] fail_under; the task's default of 90 overrides it on the CLI.
 coverage-fail-under = 100
 marimo-folder = "book/marimo/notebooks"
+
+[tool.bumpversion]
+# The version is the git tag (hatch-vcs, see [tool.hatch.version]); no file carries it,
+# so there is no current_version and no [[tool.bumpversion.files]]. The table declares
+# that, so /rhiza:release reads the version from the newest tag.
+tag_name = "v{new_version}"
