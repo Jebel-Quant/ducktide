@@ -1,8 +1,8 @@
-"""Tests for the TimeSeriesDB class in src/jqr/database/time/timeseries_db.py."""
+"""Tests for the TimeSeriesDB class in src/ducktide/time/timeseries_db.py."""
 
 from __future__ import annotations
 
-from jqr.database.time.timeseries_db import TimeSeriesDB
+from ducktide.time.timeseries_db import TimeSeriesDB
 
 
 class TestTimeSeriesDB:

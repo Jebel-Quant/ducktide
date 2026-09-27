@@ -1,4 +1,4 @@
-"""Tests for the IOMixin class in jqr.database.table._io."""
+"""Tests for the IOMixin class in ducktide.table._io."""
 
 from __future__ import annotations
 
@@ -9,8 +9,8 @@ import duckdb
 import polars as pl
 import pytest
 
-from jqr.database.orm.base import ORMModel
-from jqr.database.table import Table
+from ducktide.orm.base import ORMModel
+from ducktide.table import Table
 
 from .conftest import MockModel
 

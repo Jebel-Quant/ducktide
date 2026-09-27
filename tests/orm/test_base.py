@@ -1,11 +1,11 @@
-"""Tests for the ORMModel abstract base class in jqr.database.base."""
+"""Tests for the ORMModel abstract base class in ducktide.base."""
 
 from __future__ import annotations
 
 from abc import ABC
 from typing import ClassVar
 
-from jqr.database.orm.base import DomainModel, ORMModel
+from ducktide.orm.base import DomainModel, ORMModel
 
 
 class MockORMModel(ORMModel, DomainModel):

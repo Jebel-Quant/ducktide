@@ -6,7 +6,7 @@ which defines the interface for time series data repositories.
 
 from datetime import date
 
-from jqr.database.time.timeseries_repo import TimeSeriesRepository
+from ducktide.time.timeseries_repo import TimeSeriesRepository
 
 
 class TestTimeSeriesRepository:

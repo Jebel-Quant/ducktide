@@ -1,6 +1,6 @@
 """Database management and persistence utilities.
 
-This package provides the core database infrastructure for JQR, including:
+This package provides the core database infrastructure for ducktide, including:
 
 - **DB**: Base database connection management with DuckDB
 - **Table**: Repository-pattern interface for CRUD operations
@@ -15,8 +15,8 @@ The database layer follows a two-database architecture:
 
 Example:
     >>> from functools import partial
-    >>> from jqr.database import DB, Table
-    >>> from jqr.database.orm.example import FooORM, Foo
+    >>> from ducktide import DB, Table
+    >>> from ducktide.orm.example import FooORM, Foo
     >>>
     >>> # Create database with FooORM table
     >>> db = DB(tables_map={"foo": partial(Table, model_class=FooORM)})

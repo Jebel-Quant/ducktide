@@ -1,4 +1,4 @@
-"""Tests for the TimeSeriesQueryMixin class in jqr.database.time._query."""
+"""Tests for the TimeSeriesQueryMixin class in ducktide.time._query."""
 
 from __future__ import annotations
 
@@ -8,8 +8,8 @@ from unittest.mock import patch
 import polars as pl
 import pytest
 
-from jqr.database.exceptions import QueryError
-from jqr.database.time.timeseries_db import TimeSeriesDB
+from ducktide.exceptions import QueryError
+from ducktide.time.timeseries_db import TimeSeriesDB
 
 
 class TestTimeSeriesQueryMixin:

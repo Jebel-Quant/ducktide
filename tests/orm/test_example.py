@@ -10,9 +10,9 @@ from functools import partial
 
 import pytest
 
-from jqr.database.db import DB
-from jqr.database.orm.example import Foo, FooORM
-from jqr.database.table import Table
+from ducktide.db import DB
+from ducktide.orm.example import Foo, FooORM
+from ducktide.table import Table
 
 
 @pytest.fixture

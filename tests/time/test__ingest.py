@@ -1,4 +1,4 @@
-"""Tests for the TimeSeriesIngestMixin class in jqr.database.time._ingest."""
+"""Tests for the TimeSeriesIngestMixin class in ducktide.time._ingest."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
-from jqr.database.time import TimeSeriesDB
+from ducktide.time import TimeSeriesDB
 
 timestamp_lists = st.lists(
     st.datetimes(min_value=datetime(2000, 1, 1), max_value=datetime(2035, 12, 31)),

@@ -1,1 +1,1 @@
-"""Tests for jqr.database."""
+"""Tests for ducktide."""

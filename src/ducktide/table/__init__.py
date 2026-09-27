@@ -1,4 +1,4 @@
-"""Database table interface for the JQR ORM system.
+"""Database table interface for the ducktide ORM system.
 
 This package provides the Table class, which serves as a repository-pattern
 interface for performing database operations on specific tables.
@@ -10,8 +10,6 @@ single public :class:`Table` class:
 - :mod:`._query` — read-side query construction, lookups and the collection protocol.
 - :mod:`._write` — insert and bulk-insert operations.
 - :mod:`._io` — DataFrame conversion and CSV/Parquet import/export.
-
-Importing ``from jqr.database.table import Table`` continues to work unchanged.
 """
 
 from ._io import IOMixin

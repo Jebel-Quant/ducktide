@@ -1,42 +1,38 @@
-"""Tests for custom JQR exceptions."""
+"""Tests for the ducktide exception hierarchy."""
 
 import pytest
 
-from jqr.database.exceptions import (
+from ducktide.exceptions import (
     DatabaseConnectionError,
     DatabaseError,
     DataError,
-    # InvalidMonthError,
-    JQRError,
+    DucktideError,
     QueryError,
     ValidationError,
 )
 
 
-class TestJQRError:
-    """Tests for the JQRError base exception."""
+class TestDucktideError:
+    """Tests for the DucktideError base exception."""
 
-    def test_jqr_error_is_base_exception(self):
-        """Test that JQRError inherits from Exception."""
-        assert issubclass(JQRError, Exception)
+    def test_ducktide_error_is_base_exception(self):
+        """Test that DucktideError inherits from Exception."""
+        assert issubclass(DucktideError, Exception)
 
-    def test_can_raise_and_catch_jqr_error(self):
-        """Test that JQRError can be raised and caught."""
-        with pytest.raises(JQRError, match="test error"):
-            raise JQRError("test error")  # noqa: TRY003
+    def test_can_raise_and_catch_ducktide_error(self):
+        """Test that DucktideError can be raised and caught."""
+        with pytest.raises(DucktideError, match="test error"):
+            raise DucktideError("test error")  # noqa: TRY003
 
     def test_exception_message_preservation(self):
         """Test that exception messages are preserved."""
         test_message = "This is a test error message"
 
-        with pytest.raises(JQRError, match=test_message):
-            raise JQRError(test_message)
+        with pytest.raises(DucktideError, match=test_message):
+            raise DucktideError(test_message)
 
         with pytest.raises(ValidationError, match=test_message):
             raise ValidationError(test_message)
-
-        # with pytest.raises(InvalidMonthError, match=test_message):
-        #     raise InvalidMonthError(test_message)
 
         with pytest.raises(DatabaseError, match=test_message):
             raise DatabaseError(test_message)
@@ -54,36 +50,26 @@ class TestJQRError:
 class TestValidationError:
     """Tests for the ValidationError exception."""
 
-    def test_validation_error_inherits_from_jqr_error(self):
-        """Test that ValidationError inherits from JQRError."""
-        assert issubclass(ValidationError, JQRError)
+    def test_validation_error_inherits_from_ducktide_error(self):
+        """Test that ValidationError inherits from DucktideError."""
+        assert issubclass(ValidationError, DucktideError)
 
-    # def test_invalid_month_error_inherits_from_validation_error(self):
-    #     """Test that InvalidMonthError inherits from ValidationError."""
-    #     assert issubclass(InvalidMonthError, ValidationError)
-    #     assert issubclass(InvalidMonthError, JQRError)
-
-    def test_can_catch_validation_error_as_jqr_error(self):
-        """Test that ValidationError can be caught as JQRError."""
-        with pytest.raises(JQRError):
+    def test_can_catch_validation_error_as_ducktide_error(self):
+        """Test that ValidationError can be caught as DucktideError."""
+        with pytest.raises(DucktideError):
             raise ValidationError("validation failed")  # noqa: TRY003
-
-    # def test_can_catch_invalid_month_error_as_validation_error(self):
-    #     """Test that InvalidMonthError can be caught as ValidationError."""
-    #     with pytest.raises(ValidationError):
-    #         raise InvalidMonthError("invalid month")
 
 
 class TestDatabaseError:
     """Tests for the DatabaseError exception."""
 
-    def test_database_error_inherits_from_jqr_error(self):
-        """Test that DatabaseError inherits from JQRError."""
-        assert issubclass(DatabaseError, JQRError)
+    def test_database_error_inherits_from_ducktide_error(self):
+        """Test that DatabaseError inherits from DucktideError."""
+        assert issubclass(DatabaseError, DucktideError)
 
-    def test_can_catch_database_error_as_jqr_error(self):
-        """Test that DatabaseError can be caught as JQRError."""
-        with pytest.raises(JQRError):
+    def test_can_catch_database_error_as_ducktide_error(self):
+        """Test that DatabaseError can be caught as DucktideError."""
+        with pytest.raises(DucktideError):
             raise DatabaseError("database error")  # noqa: TRY003
 
 
@@ -93,7 +79,7 @@ class TestDatabaseConnectionError:
     def test_database_connection_error_inherits_from_database_error(self):
         """Test that DatabaseConnectionError inherits from DatabaseError."""
         assert issubclass(DatabaseConnectionError, DatabaseError)
-        assert issubclass(DatabaseConnectionError, JQRError)
+        assert issubclass(DatabaseConnectionError, DucktideError)
 
     def test_can_catch_database_connection_error_as_database_error(self):
         """Test that DatabaseConnectionError can be caught as DatabaseError."""
@@ -107,7 +93,7 @@ class TestQueryError:
     def test_query_error_inherits_from_database_error(self):
         """Test that QueryError inherits from DatabaseError."""
         assert issubclass(QueryError, DatabaseError)
-        assert issubclass(QueryError, JQRError)
+        assert issubclass(QueryError, DucktideError)
 
     def test_can_catch_query_error_as_database_error(self):
         """Test that QueryError can be caught as DatabaseError."""
@@ -118,11 +104,11 @@ class TestQueryError:
 class TestDataError:
     """Tests for the DataError exception."""
 
-    def test_data_error_inherits_from_jqr_error(self):
-        """Test that DataError inherits from JQRError."""
-        assert issubclass(DataError, JQRError)
+    def test_data_error_inherits_from_ducktide_error(self):
+        """Test that DataError inherits from DucktideError."""
+        assert issubclass(DataError, DucktideError)
 
-    def test_can_catch_data_error_as_jqr_error(self):
-        """Test that DataError can be caught as JQRError."""
-        with pytest.raises(JQRError):
+    def test_can_catch_data_error_as_ducktide_error(self):
+        """Test that DataError can be caught as DucktideError."""
+        with pytest.raises(DucktideError):
             raise DataError("data error")  # noqa: TRY003

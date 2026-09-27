@@ -18,9 +18,9 @@ Key Features:
 
 Example:
     >>> from functools import partial
-    >>> from jqr.database.db import DB
-    >>> from jqr.database.orm.example import FooORM, Foo
-    >>> from jqr.database.table import Table
+    >>> from ducktide.db import DB
+    >>> from ducktide.orm.example import FooORM, Foo
+    >>> from ducktide.table import Table
     >>>
     >>> # Create database and insert data
     >>> db = DB(tables_map={"foo": partial(Table, model_class=FooORM)})
@@ -71,7 +71,7 @@ def _is_column_key(key: str) -> bool:
 class DomainModel(BaseModel):
     """Base class for domain models.
 
-    This class provides a common base for all domain models in JQR,
+    This class provides a common base for all domain models,
     ensuring consistent configuration and automatic table name inference.
     """
 
@@ -93,9 +93,9 @@ class ORMModel(ABC):
 
     Example:
         >>> from functools import partial
-        >>> from jqr.database import DB
-        >>> from jqr.database.orm.example import FooORM
-        >>> from jqr.database.table import Table
+        >>> from ducktide import DB
+        >>> from ducktide.orm.example import FooORM
+        >>> from ducktide.table import Table
         >>>
         >>> # FooORM is a concrete implementation of ORMModel
         >>> db = DB(tables_map={"foo": partial(Table, model_class=FooORM)})
@@ -131,7 +131,7 @@ class ORMModel(ABC):
         filtering out non-column entries like FOREIGN KEY constraints.
 
         Example:
-            >>> from jqr.database.orm.base import ORMModel
+            >>> from ducktide.orm.base import ORMModel
             >>>
             >>> # Define a model with _schema but no _columns
             >>> class BarORM(ORMModel):
@@ -207,7 +207,7 @@ class ORMModel(ABC):
             str: A SQL CREATE TABLE IF NOT EXISTS statement.
 
         Example:
-            >>> from jqr.database.orm.example import FooORM
+            >>> from ducktide.orm.example import FooORM
             >>> sql = FooORM.generate_create_table_sql()
             >>> print(sql)  # doctest: +NORMALIZE_WHITESPACE
             CREATE TABLE IF NOT EXISTS foo (

@@ -1,0 +1,75 @@
+[project]
+name = "ducktide"
+# Derived from the git tag by hatch-vcs (see [tool.hatch.version]), so the tag is the
+# single source of truth and a release is `git tag` alone.
+dynamic = ["version"]
+description = "Immutable Pydantic models and append-fast time series on DuckDB + Polars"
+authors = [{name = "Thomas Schmelzer"}]
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+requires-python = ">=3.11,<3.14"
+keywords = ["duckdb", "polars", "pydantic", "orm", "repository-pattern", "time-series"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Intended Audience :: Developers",
+    "Topic :: Database",
+    "Typing :: Typed",
+]
+
+dependencies = [
+    "duckdb>=1.5.5,<2",
+    "polars>=1.44.2,<2",
+    "pyarrow>=25.0.0",  # DuckDB hands results to Polars via Arrow (`.pl()`)
+    "pydantic>=2.13.5,<3",
+]
+
+[project.urls]
+Homepage = "https://github.com/Jebel-Quant/ducktide"
+Repository = "https://github.com/Jebel-Quant/ducktide"
+Issues = "https://github.com/Jebel-Quant/ducktide/issues"
+
+[dependency-groups]
+# Marimo notebooks under book/marimo/notebooks.
+notebooks = [
+    "marimo>=0.24.2",
+    "numpy>=2.4.6",
+]
+dev = [
+    {include-group = "notebooks"},
+]
+test = [
+    "hypothesis>=6.168.0",
+    "pytest>=9.1.1",
+    "pytest-cov>=6.0",
+    "pytest-timeout>=2.0",
+]
+
+[build-system]
+requires = ["hatchling", "hatch-vcs"]
+build-backend = "hatchling.build"
+
+# Between tags hatch-vcs reports the next patch as a dev release; without a visible tag
+# the build fails loudly rather than shipping a plausible-looking constant.
+[tool.hatch.version]
+source = "vcs"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/ducktide"]
+
+[tool.hatch.build]
+include = [
+    "LICENSE",
+    "README.md",
+    "src/ducktide",
+]
+
+[tool.coverage.run]
+branch = true
+
+[tool.coverage.report]
+fail_under = 100

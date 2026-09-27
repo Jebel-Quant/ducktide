@@ -1,12 +1,13 @@
-"""Tests for the TableBase class in jqr.database.table._base."""
+"""Tests for the TableBase class in ducktide.table._base."""
 
 from __future__ import annotations
 
 from datetime import date
 
+import duckdb
 import pytest
 
-from jqr.database.exceptions import DataError
+from ducktide.exceptions import DataError
 
 from .conftest import MockModel
 
@@ -37,10 +38,21 @@ class TestTableBase:
 
     def test_init(self, connection):
         """Test Table initialization."""
-        from jqr.database.table import Table
+        from ducktide.table import Table
 
         table = Table(connection, MockModel)
         assert table.pk == "id"
+
+    def test_init_read_only_skips_schema_creation(self):
+        """A read-only Table must not issue CREATE TABLE against the connection."""
+        from ducktide.table import Table
+
+        con = duckdb.connect(":memory:")
+        try:
+            table = Table(con, MockModel, read_only=True)
+            assert not table.exists
+        finally:
+            con.close()
 
     def test_values_from_obj_wrong_type(self, table):
         """Test _values_from_obj with an object of the wrong type."""

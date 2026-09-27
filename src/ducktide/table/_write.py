@@ -31,9 +31,9 @@ class WriteMixin(TableBase):
 
         Example:
             >>> from functools import partial
-            >>> from jqr.database.db import DB
-            >>> from jqr.database.orm.example import FooORM
-            >>> from jqr.database.table import Table
+            >>> from ducktide.db import DB
+            >>> from ducktide.orm.example import FooORM
+            >>> from ducktide.table import Table
             >>>
             >>> db = DB(tables_map={"foo": partial(Table, model_class=FooORM)})
             >>> foo1 = FooORM(id=1, name="apple")
@@ -87,9 +87,9 @@ class WriteMixin(TableBase):
 
         Example:
             >>> from functools import partial
-            >>> from jqr.database.db import DB
-            >>> from jqr.database.orm.example import FooORM
-            >>> from jqr.database.table import Table
+            >>> from ducktide.db import DB
+            >>> from ducktide.orm.example import FooORM
+            >>> from ducktide.table import Table
             >>>
             >>> db = DB(tables_map={"foo": partial(Table, model_class=FooORM)})
             >>>

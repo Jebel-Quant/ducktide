@@ -1,10 +1,10 @@
-"""Tests for the database context utilities in jqr.database.context."""
+"""Tests for the database context utilities in ducktide.context."""
 
 from __future__ import annotations
 
 import pytest
 
-from jqr.database.context import (
+from ducktide.context import (
     clear_default_db,
     get_default_db,
     set_default_db,

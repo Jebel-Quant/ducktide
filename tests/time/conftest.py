@@ -1,4 +1,4 @@
-"""Shared fixtures for the jqr.database.time test package.
+"""Shared fixtures for the ducktide.time test package.
 
 Security note: S101 (assert statements) are intentional in test code — pytest
 relies on assert for test assertions and they are never executed in production.
@@ -11,7 +11,7 @@ from datetime import date
 import polars as pl
 import pytest
 
-from jqr.database.time.timeseries_db import TimeSeriesDB
+from ducktide.time.timeseries_db import TimeSeriesDB
 
 
 @pytest.fixture

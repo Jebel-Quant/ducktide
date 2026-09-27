@@ -2,14 +2,14 @@
 # requires-python = ">=3.11"
 # dependencies = [
 #     "marimo",
-#     "futures",
+#     "ducktide",
 # ]
 #
 # [tool.uv.sources]
-# futures = { path = "../../.." }
+# ducktide = { path = "../../.." }
 # ///
 
-"""Example Marimo notebook demonstrating the jqr.database system."""
+"""Example Marimo notebook demonstrating the ducktide system."""
 
 import marimo
 
@@ -19,8 +19,8 @@ app = marimo.App(width="medium")
 with app.setup:
     from functools import partial
 
-    from jqr.database import DB, Table
-    from jqr.database.orm.example import Foo, FooORM
+    from ducktide import DB, Table
+    from ducktide.orm.example import Foo, FooORM
 
     db = DB(tables_map={"foo": partial(Table, model_class=FooORM)})
 

@@ -4,8 +4,8 @@ This module contains tests for the TimeSeriesModel abstract base class,
 which provides time series data access functionality to domain models.
 
 These tests exercise the model against a real in-memory
-:class:`~jqr.database.time.TimeSeriesDB` (the concrete
-:class:`~jqr.database.time.timeseries_repo.TimeSeriesRepository`) and assert on
+:class:`~ducktide.time.TimeSeriesDB` (the concrete
+:class:`~ducktide.time.timeseries_repo.TimeSeriesRepository`) and assert on
 observable behaviour — the frames returned and the rows persisted — rather than
 on the internal sequence of repository calls. The model's own guard clauses
 (missing ``instrument_id`` / ``table_name``) are exercised directly.
@@ -17,10 +17,10 @@ from typing import ClassVar
 import polars as pl
 import pytest
 
-from jqr.database.exceptions import ValidationError
-from jqr.database.orm.base import DomainModel
-from jqr.database.time import TimeSeriesDB
-from jqr.database.time.timeseries_model import TimeSeriesModel
+from ducktide.exceptions import ValidationError
+from ducktide.orm.base import DomainModel
+from ducktide.time import TimeSeriesDB
+from ducktide.time.timeseries_model import TimeSeriesModel
 
 
 # Create a concrete implementation of TimeSeriesModel for testing
@@ -45,7 +45,7 @@ def repo() -> TimeSeriesDB:
     """Return a real, empty in-memory time series repository.
 
     Returns:
-        An in-memory :class:`~jqr.database.time.TimeSeriesDB` instance.
+        An in-memory :class:`~ducktide.time.TimeSeriesDB` instance.
     """
     return TimeSeriesDB()
 

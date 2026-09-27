@@ -1,1 +1,1 @@
-"""Tests for jqr.database.orm."""
+"""Tests for ducktide.orm."""

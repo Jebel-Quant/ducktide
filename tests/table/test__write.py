@@ -1,4 +1,4 @@
-"""Tests for the WriteMixin class in jqr.database.table._write."""
+"""Tests for the WriteMixin class in ducktide.table._write."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ from datetime import date
 
 import pytest
 
-from jqr.database.exceptions import QueryError
+from ducktide.exceptions import QueryError
 
 from .conftest import MockModel
 
@@ -48,6 +48,13 @@ class TestWriteMixin:
         assert len(table) == 1
         retrieved = table.get(1)
         assert retrieved.name == "test"
+
+    def test_insert_single_constraint_violation_raises(self, table):
+        """A duplicate primary key on a single-row insert surfaces as QueryError."""
+        table.insert(MockModel(1, "a"))
+        with pytest.raises(QueryError, match="Constraint violation inserting into 'mock_table'"):
+            table.insert(MockModel(1, "duplicate"))
+        assert len(table) == 1
 
     def test_insert_multiple(self, table):
         """Test inserting multiple objects (delegates to bulk_insert)."""

@@ -1,4 +1,4 @@
-"""Tests for the TimeSeriesIOMixin class in jqr.database.time._io."""
+"""Tests for the TimeSeriesIOMixin class in ducktide.time._io."""
 
 from __future__ import annotations
 
@@ -6,8 +6,8 @@ from pathlib import Path
 
 import pytest
 
-from jqr.database.exceptions import QueryError, ValidationError
-from jqr.database.time.timeseries_db import TimeSeriesDB
+from ducktide.exceptions import QueryError, ValidationError
+from ducktide.time.timeseries_db import TimeSeriesDB
 
 
 class TestTimeSeriesIOMixin:

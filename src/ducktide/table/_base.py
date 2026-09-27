@@ -1,4 +1,4 @@
-"""Base state and shared helpers for the :class:`~jqr.database.table.Table`.
+"""Base state and shared helpers for the :class:`~ducktide.table.Table`.
 
 This module defines :class:`TableBase`, which owns the connection, the bound
 model class and the cached table metadata (name, columns, primary key) shared
@@ -21,7 +21,7 @@ class TableBase:
     """Shared state and helpers for the table mixins.
 
     Holds the active connection and the metadata derived from the bound model
-    class. The concrete :class:`~jqr.database.table.Table` composes this base
+    class. The concrete :class:`~ducktide.table.Table` composes this base
     with the query, write and import/export mixins.
 
     Attributes:

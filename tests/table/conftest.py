@@ -1,4 +1,4 @@
-"""Shared fixtures and helpers for the jqr.database.table test package.
+"""Shared fixtures and helpers for the ducktide.table test package.
 
 Security note: S101 (assert statements) are intentional in test code — pytest
 relies on assert for test assertions and they are never executed in production.
@@ -12,8 +12,8 @@ from typing import Any, ClassVar
 import duckdb
 import pytest
 
-from jqr.database.orm.base import ORMModel
-from jqr.database.table import Table
+from ducktide.orm.base import ORMModel
+from ducktide.table import Table
 
 
 class MockModel(ORMModel):

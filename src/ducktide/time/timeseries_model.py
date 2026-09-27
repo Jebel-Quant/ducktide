@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING
 
 import polars as pl
 
-from jqr.database.exceptions import ValidationError
+from ducktide.exceptions import ValidationError
 
 if TYPE_CHECKING:
     from .timeseries_repo import TimeSeriesRepository

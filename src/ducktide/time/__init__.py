@@ -13,7 +13,7 @@ The time series layer is designed for:
 - High-volume numerical data (price, volume, order book, etc.)
 
 Example:
-    >>> from jqr.database.time import TimeSeriesDB
+    >>> from ducktide.time import TimeSeriesDB
     >>> ts_db = TimeSeriesDB()
     >>> df = ts_db.get_timeseries_frame("future", instrument_id=100)
 """

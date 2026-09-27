@@ -1,9 +1,9 @@
-"""Base state and shared helpers for :class:`~jqr.database.time.TimeSeriesDB`.
+"""Base state and shared helpers for :class:`~ducktide.time.TimeSeriesDB`.
 
 This module defines :class:`TimeSeriesBase`, which owns the DuckDB connection
 and the configured timestamp column, plus the small validation/quoting helpers
 and catalog lookups shared by every time-series mixin (query, ingest and
-import/export). The concrete :class:`~jqr.database.time.TimeSeriesDB` composes
+import/export). The concrete :class:`~ducktide.time.TimeSeriesDB` composes
 this base with those mixins.
 """
 

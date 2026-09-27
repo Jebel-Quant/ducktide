@@ -17,11 +17,11 @@ The separation allows:
 3. Clean separation of concerns
 
 :class:`TimeSeriesDB` composes three focused mixins over
-:class:`~jqr.database.time._base.TimeSeriesBase`:
+:class:`~ducktide.time._base.TimeSeriesBase`:
 
-- :class:`~jqr.database.time._query.TimeSeriesQueryMixin` — time-ordered reads
-- :class:`~jqr.database.time._ingest.TimeSeriesIngestMixin` — append-only ingestion
-- :class:`~jqr.database.time._io.TimeSeriesIOMixin` — CSV/Parquet import & export
+- :class:`~ducktide.time._query.TimeSeriesQueryMixin` — time-ordered reads
+- :class:`~ducktide.time._ingest.TimeSeriesIngestMixin` — append-only ingestion
+- :class:`~ducktide.time._io.TimeSeriesIOMixin` — CSV/Parquet import & export
 """
 
 from ._ingest import TimeSeriesIngestMixin
@@ -41,7 +41,7 @@ class TimeSeriesDB(TimeSeriesQueryMixin, TimeSeriesIngestMixin, TimeSeriesIOMixi
 
     This implements the TimeSeriesRepository protocol for use with domain models.
     The connection ownership and shared helpers live in
-    :class:`~jqr.database.time._base.TimeSeriesBase`; the read, ingest and
+    :class:`~ducktide.time._base.TimeSeriesBase`; the read, ingest and
     import/export behaviours are contributed by the composed mixins.
 
     Example:

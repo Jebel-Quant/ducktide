@@ -13,10 +13,10 @@ Key Benefits:
 Usage Patterns:
     1. **Context Manager (Recommended):**
         >>> from functools import partial
-        >>> from jqr.database.context import use_db, set_default_db, get_default_db
-        >>> from jqr.database.db import DB
-        >>> from jqr.database.orm.example import FooORM
-        >>> from jqr.database.table import Table
+        >>> from ducktide.context import use_db, set_default_db, get_default_db
+        >>> from ducktide.db import DB
+        >>> from ducktide.orm.example import FooORM
+        >>> from ducktide.table import Table
         >>>
         >>> # Create database
         >>> db = DB(tables_map={"foo": partial(Table, model_class=FooORM)})
@@ -53,7 +53,7 @@ from contextvars import ContextVar
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
-    from jqr.database.db import DB
+    from ducktide.db import DB
 
 # Type hint as object to avoid circular import; use actual Database type in runtime checks if needed
 _default_db: ContextVar[object | None] = ContextVar("_default_db", default=None)
@@ -72,7 +72,7 @@ def clear_default_db() -> None:
     """Clear the default DB for the current context (set to None).
 
     Example:
-        >>> from jqr.database.context import clear_default_db
+        >>> from ducktide.context import clear_default_db
         >>> clear_default_db()
     """
     _default_db.set(None)
@@ -91,7 +91,7 @@ def get_default_db() -> DB | object:
     if db is None:
         raise RuntimeError(  # noqa: TRY003
             "No default Database set for this context. "
-            "Pass a Database explicitly or use `jqr.database.context.use_db(db)` / set_default_db(db)."
+            "Pass a Database explicitly or use `ducktide.context.use_db(db)` / set_default_db(db)."
         )
     return db
 

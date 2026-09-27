@@ -1,4 +1,4 @@
-"""Tests for the jqr.database.db.DB class."""
+"""Tests for the ducktide.db.DB class."""
 
 from __future__ import annotations
 
@@ -7,9 +7,9 @@ from typing import Any, ClassVar
 import duckdb
 import pytest
 
-from jqr.database.db import DB
-from jqr.database.orm.base import ORMModel
-from jqr.database.table import Table
+from ducktide.db import DB
+from ducktide.orm.base import ORMModel
+from ducktide.table import Table
 
 
 class MockORMModel(ORMModel):

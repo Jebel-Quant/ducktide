@@ -6,8 +6,8 @@ import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
-from jqr.database.exceptions import ValidationError
-from jqr.database.utils.path_validation import escape_path_for_sql, validate_file_path
+from ducktide.exceptions import ValidationError
+from ducktide.utils.path_validation import escape_path_for_sql, validate_file_path
 
 
 def test_validate_file_path_returns_resolved_path(tmp_path):

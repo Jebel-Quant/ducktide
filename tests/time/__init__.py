@@ -1,1 +1,1 @@
-"""Tests for jqr.database.time."""
+"""Tests for ducktide.time."""

@@ -2,19 +2,19 @@
 # requires-python = ">=3.11"
 # dependencies = [
 #     "marimo",
-#     "futures",
+#     "ducktide",
 #     "duckdb",
 #     "polars",
 # ]
 #
 # [tool.uv.sources]
-# futures = { path = "../../.." }
+# ducktide = { path = "../../.." }
 # ///
 
-"""Marimo notebook demonstrating the jqr.database system.
+"""Marimo notebook demonstrating the ducktide system.
 
 This notebook demonstrates:
-- Database initialization with DuckDB (jqr.database.DB)
+- Database initialization with DuckDB (ducktide.DB)
 - Creating custom model classes for use with the Table interface
 - Repository pattern operations (insert, select, get, delete)
 - Bulk data ingestion and export (CSV/Parquet)
@@ -35,9 +35,9 @@ with app.setup:
 
     import polars as pl
 
-    from jqr.database.db import DB
-    from jqr.database.table import Table
-    from jqr.database.time import TimeSeriesDB
+    from ducktide.db import DB
+    from ducktide.table import Table
+    from ducktide.time import TimeSeriesDB
 
 
 @app.cell(hide_code=True)
@@ -47,9 +47,9 @@ def cell_intro_header():
 
     mo.md(
         """
-        # 🗄️ jqr.database System Demo
+        # 🗄️ ducktide System Demo
 
-        This notebook demonstrates the core database infrastructure in `jqr.database`.
+        This notebook demonstrates the core database infrastructure in `ducktide`.
         Unlike the ORM layer, this layer provides more direct control over table definitions
         and database operations while still following the Repository pattern.
 
@@ -82,7 +82,7 @@ def cell_define_model():
         quantity: int
         timestamp: datetime
 
-        # Required metadata for jqr.database.Table
+        # Required metadata for ducktide.Table
         _table_name = "trades"
         _primary_key = "trade_id"
         _columns: ClassVar[list[str]] = ["trade_id", "symbol", "price", "quantity", "timestamp"]
@@ -124,7 +124,7 @@ def cell_section2_header(mo):
 @app.cell
 def cell_init_db(Trade, TradeTable):
     """Initialize the database with the custom table."""
-    # jqr.database.DB takes a map of {attribute_name: table_cls}
+    # ducktide.DB takes a map of {attribute_name: table_cls}
     # where table_cls is a class that can be initialized with (connection, read_only=...)
     db = DB(tables_map={"trades": TradeTable}, db_path=":memory:")
     print("✓ Database initialized with custom table mapping.")
@@ -267,7 +267,7 @@ def cell_summary(mo, db):
         - **Models used**: `Trade` (Custom)
         - **Storage**: DuckDB (In-memory)
 
-        This demonstrates how `jqr.database` provides a robust foundation for both relational
+        This demonstrates how `ducktide` provides a robust foundation for both relational
         metadata and high-volume time series data without the overhead of a full ORM.
         """
     )

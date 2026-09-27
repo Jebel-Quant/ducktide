@@ -9,7 +9,6 @@ from datetime import date
 from typing import Any
 
 import polars as pl
-from loguru import logger
 
 from ..exceptions import QueryError
 from ..utils import sql
@@ -54,7 +53,7 @@ class TimeSeriesQueryMixin(TimeSeriesBase):
                 table (e.g., missing time column, type errors, corrupted data).
 
         Examples:
-            >>> from jqr.database.time import TimeSeriesDB
+            >>> from ducktide.time import TimeSeriesDB
             >>> from datetime import date
             >>>
             >>> ts_db = TimeSeriesDB()
@@ -91,7 +90,6 @@ class TimeSeriesQueryMixin(TimeSeriesBase):
         except Exception as exc:
             # Anything beyond a missing table is a real failure: surface it as a
             # typed error instead of masking it with an empty DataFrame.
-            logger.error(f"Failed to query timeseries from '{table}': {exc}")
             raise QueryError(f"Failed to query timeseries from '{table}': {exc}") from exc  # noqa: TRY003
         else:
             return frame

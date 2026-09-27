@@ -7,7 +7,7 @@ performing file I/O operations.
 
 from pathlib import Path
 
-from jqr.database.exceptions import ValidationError
+from ducktide.exceptions import ValidationError
 
 
 def validate_file_path(path: str | Path, must_exist: bool = False, base_dir: str | Path | None = None) -> Path:
@@ -22,7 +22,7 @@ def validate_file_path(path: str | Path, must_exist: bool = False, base_dir: str
       real location that will be opened.
     * **Confinement, but only when ``base_dir`` is given.** With ``base_dir``
       set, the *resolved* path must lie inside the *resolved* base directory or
-      a :class:`~jqr.database.exceptions.ValidationError` is raised. Because the
+      a :class:`~ducktide.exceptions.ValidationError` is raised. Because the
       comparison happens after resolution, this rejects both ``../`` traversal
       and symlinks that point out of the base directory.
 
@@ -51,7 +51,7 @@ def validate_file_path(path: str | Path, must_exist: bool = False, base_dir: str
 
     Examples:
         >>> from pathlib import Path
-        >>> from jqr.database.utils.path_validation import validate_file_path
+        >>> from ducktide.utils.path_validation import validate_file_path
         >>> # Valid paths are resolved and returned
         >>> p = validate_file_path("data.csv")
         >>> isinstance(p, Path)
@@ -114,7 +114,7 @@ def escape_path_for_sql(path: Path) -> str:
         on Windows.
 
         >>> from pathlib import Path
-        >>> from jqr.database.utils.path_validation import escape_path_for_sql
+        >>> from ducktide.utils.path_validation import escape_path_for_sql
         >>> escape_path_for_sql(Path("data.csv"))
         'data.csv'
         >>> escape_path_for_sql(Path("it's data.csv"))

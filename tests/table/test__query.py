@@ -1,4 +1,4 @@
-"""Tests for the QueryMixin class in jqr.database.table._query."""
+"""Tests for the QueryMixin class in ducktide.table._query."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ from datetime import date
 
 import pytest
 
-from jqr.database.exceptions import ValidationError
+from ducktide.exceptions import ValidationError
 
 from .conftest import MockModel
 

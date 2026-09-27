@@ -1,4 +1,4 @@
-"""Tests for the TimeSeriesBase class in jqr.database.time._base."""
+"""Tests for the TimeSeriesBase class in ducktide.time._base."""
 
 from __future__ import annotations
 
@@ -7,8 +7,8 @@ from datetime import date
 import polars as pl
 import pytest
 
-from jqr.database.exceptions import ValidationError
-from jqr.database.time.timeseries_db import TimeSeriesDB
+from ducktide.exceptions import ValidationError
+from ducktide.time.timeseries_db import TimeSeriesDB
 
 
 class TestTimeSeriesBase:

@@ -13,7 +13,7 @@ from typing import Any, Self
 
 import duckdb
 
-from jqr.database.utils import sql
+from ducktide.utils import sql
 
 
 class DB:
@@ -25,8 +25,8 @@ class DB:
 
     Example:
         >>> from functools import partial
-        >>> from jqr.database import DB, Table
-        >>> from jqr.database.orm.example import FooORM, Foo
+        >>> from ducktide import DB, Table
+        >>> from ducktide.orm.example import FooORM, Foo
         >>>
         >>> # Initialize with a mapping of attribute names to table classes
         >>> db = DB(tables_map={"foo": partial(Table, model_class=FooORM)})
@@ -55,9 +55,9 @@ class DB:
 
         Example:
             >>> from functools import partial
-            >>> from jqr.database.db import DB
-            >>> from jqr.database.orm.example import FooORM
-            >>> from jqr.database.table import Table
+            >>> from ducktide.db import DB
+            >>> from ducktide.orm.example import FooORM
+            >>> from ducktide.table import Table
             >>>
             >>> db = DB(tables_map={"foo": partial(Table, model_class=FooORM)})
             >>> db.db_path
@@ -84,9 +84,9 @@ class DB:
 
         Example:
             >>> from functools import partial
-            >>> from jqr.database.db import DB
-            >>> from jqr.database.orm.example import FooORM, Foo
-            >>> from jqr.database.table import Table
+            >>> from ducktide.db import DB
+            >>> from ducktide.orm.example import FooORM, Foo
+            >>> from ducktide.table import Table
             >>>
             >>> db = DB(tables_map={"foo": partial(Table, model_class=FooORM)})
             >>>
@@ -132,9 +132,9 @@ class DB:
 
         Example:
             >>> from functools import partial
-            >>> from jqr.database.db import DB
-            >>> from jqr.database.orm.example import FooORM, Foo
-            >>> from jqr.database.table import Table
+            >>> from ducktide.db import DB
+            >>> from ducktide.orm.example import FooORM, Foo
+            >>> from ducktide.table import Table
             >>>
             >>> db = DB(tables_map={"foo": partial(Table, model_class=FooORM)})
             >>> db.table[Foo] == db.foo
@@ -155,7 +155,7 @@ class DB:
             duckdb.DuckDBPyConnection: The DuckDB connection object after execution.
 
         Example:
-            >>> from jqr.database.db import DB
+            >>> from ducktide.db import DB
             >>> db = DB(tables_map={})
             >>> res = db.execute_query("SELECT 1 as val")
             >>> res.fetchone()
@@ -187,9 +187,9 @@ class DB:
 
         Example:
             >>> from functools import partial
-            >>> from jqr.database.db import DB
-            >>> from jqr.database.orm.example import FooORM
-            >>> from jqr.database.table import Table
+            >>> from ducktide.db import DB
+            >>> from ducktide.orm.example import FooORM
+            >>> from ducktide.table import Table
             >>>
             >>> db = DB(tables_map={"foo": partial(Table, model_class=FooORM)})
             >>> db.drop_all_tables()
@@ -209,7 +209,7 @@ class DB:
             Self: The database instance itself.
 
         Example:
-            >>> from jqr.database.db import DB
+            >>> from ducktide.db import DB
             >>> with DB(tables_map={}) as db:
             ...     res = db.execute_query("SELECT 42")
             ...     res.fetchone()

@@ -6,11 +6,14 @@ first write and appends only rows newer than the current maximum timestamp
 avoiding duplicate observations.
 """
 
+import logging
+
 import polars as pl
-from loguru import logger
 
 from ..utils import sql
 from ._base import TimeSeriesBase
+
+logger = logging.getLogger(__name__)
 
 
 class TimeSeriesIngestMixin(TimeSeriesBase):
@@ -34,7 +37,7 @@ class TimeSeriesIngestMixin(TimeSeriesBase):
 
         Examples:
             >>> import polars as pl
-            >>> from jqr.database.time import TimeSeriesDB
+            >>> from ducktide.time import TimeSeriesDB
             >>> from datetime import datetime
             >>>
             >>> ts_db = TimeSeriesDB()
@@ -123,7 +126,7 @@ class TimeSeriesIngestMixin(TimeSeriesBase):
             table: The destination table name.
             frame: The DataFrame to append (must contain ``instrument_id``).
         """
-        logger.info(f"Ingesting {len(frame)} rows into '{table}'...")
+        logger.info("Ingesting %d rows into '%s'...", len(frame), table)
 
         # quoted_table is produced by _quote_identifier from a name already
         # validated by _validate_table_name, and time_col is the configured
@@ -133,10 +136,10 @@ class TimeSeriesIngestMixin(TimeSeriesBase):
         new_frame = self._filter_new_per_instrument(frame, max_ts_df)
 
         if new_frame.height > 0:
-            logger.info(f"Appending {len(new_frame)} new rows to '{table}'...")
+            logger.info("Appending %d new rows to '%s'...", len(new_frame), table)
             self._append(table, new_frame)
         else:
-            logger.info(f"No new rows to append to '{table}'.")
+            logger.info("No new rows to append to '%s'.", table)
 
     def _filter_new_per_instrument(self, frame: pl.DataFrame, max_ts_df: pl.DataFrame) -> pl.DataFrame:
         """Return only the rows newer than the existing per-instrument maxima.

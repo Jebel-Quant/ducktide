@@ -1,16 +1,15 @@
-"""Custom exceptions for JQR package.
+"""Custom exceptions for ducktide.
 
-This module defines a hierarchy of exceptions specific to the JQR futures
-trading platform. Using custom exceptions makes it easier to:
+This module defines the exception hierarchy raised by ducktide. Using custom
+exceptions makes it easier to:
 - Write specific error handlers
 - Distinguish between different error scenarios
 - Provide better error messages to users
 - Debug issues more effectively
 
 Exception Hierarchy:
-    JQRError (base)
+    DucktideError (base)
     ├── ValidationError (data validation failures)
-    │   └── InvalidMonthError (invalid month codes/numbers)
     ├── DatabaseError (database operations)
     │   ├── DatabaseConnectionError (database connection issues)
     │   └── QueryError (query execution failures)
@@ -18,15 +17,15 @@ Exception Hierarchy:
 """
 
 
-class JQRError(Exception):
-    """Base exception for all JQR-specific errors.
+class DucktideError(Exception):
+    """Base exception for all ducktide errors.
 
-    All custom exceptions in the JQR package inherit from this class,
-    making it easy to catch any JQR-specific error with a single except clause.
+    Every exception raised by ducktide inherits from this class, so any
+    ducktide error can be caught with a single except clause.
     """
 
 
-class ValidationError(JQRError):
+class ValidationError(DucktideError):
     """Raised when data validation fails.
 
     This exception is used when input data does not meet expected
@@ -40,7 +39,7 @@ class ValidationError(JQRError):
     """
 
 
-class DatabaseError(JQRError):
+class DatabaseError(DucktideError):
     """Raised when database operations fail.
 
     This is a general exception for database-related errors including
@@ -77,7 +76,7 @@ class QueryError(DatabaseError):
     """
 
 
-class DataError(JQRError):
+class DataError(DucktideError):
     """Raised when there are data processing or type errors.
 
     This exception is used for type mismatches, unexpected data formats,

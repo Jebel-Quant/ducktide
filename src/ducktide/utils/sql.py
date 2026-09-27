@@ -9,8 +9,8 @@ query parameters.
 
 The safety contract is therefore pushed to the callers: every ``source`` /
 ``table`` / ``schema`` / ``column`` argument must already be code-derived or
-validated (see :class:`jqr.database.time._base.TimeSeriesBase` — ``_validate_table_name``
-and ``_quote_identifier`` — and :func:`jqr.database.utils.path_validation.escape_path_for_sql`)
+validated (see :class:`ducktide.time._base.TimeSeriesBase` — ``_validate_table_name``
+and ``_quote_identifier`` — and :func:`ducktide.utils.path_validation.escape_path_for_sql`)
 and never raw user data. All row *values* continue to be bound via ``?``
 placeholders by the callers.
 
@@ -25,7 +25,7 @@ in docstrings:
   :func:`validate_identifier`, which reject anything that is not a plain SQL
   identifier (optionally ``schema.table`` qualified). Callers that build table
   names route through these (see
-  :class:`jqr.database.time._base.TimeSeriesBase`).
+  :class:`ducktide.time._base.TimeSeriesBase`).
 * The three builders that interpolate a *raw* column/schema identifier
   (:func:`select_max_per_instrument`, :func:`select_coalesce_max`,
   :func:`create_schema_if_not_exists`) call :func:`validate_identifier` on that
@@ -44,14 +44,14 @@ with its own exclude list) and they *disagree* about which lines trigger B608:
 ``make security`` reports some of the markers below as redundant while the
 ``make fmt`` hook fails without them.
 * Path literals are pre-escaped via
-  :func:`~jqr.database.utils.path_validation.escape_path_for_sql`; option lists
+  :func:`~ducktide.utils.path_validation.escape_path_for_sql`; option lists
   and query fragments are code-built, never raw user data. Row *values* are
   always bound via ``?`` placeholders by the callers.
 """
 
 import re
 
-from jqr.database.exceptions import ValidationError
+from ducktide.exceptions import ValidationError
 
 # Valid SQL identifier (no quoting tricks, no injection); optionally qualified
 # as ``schema.table`` (at most two dot-separated parts).
@@ -236,7 +236,7 @@ def copy_select_to(columns: str, source: str, escaped_path: str, options: str) -
             with optional casts).
         source: A validated (optionally quoted) table name.
         escaped_path: A path already escaped via
-            :func:`~jqr.database.utils.path_validation.escape_path_for_sql`.
+            :func:`~ducktide.utils.path_validation.escape_path_for_sql`.
         options: A comma-separated list of literal ``COPY`` options.
 
     Returns:
@@ -250,7 +250,7 @@ def read_csv_expr(escaped_path: str, options: str = "") -> str:
 
     Args:
         escaped_path: A path already escaped via
-            :func:`~jqr.database.utils.path_validation.escape_path_for_sql`.
+            :func:`~ducktide.utils.path_validation.escape_path_for_sql`.
         options: A comma-separated list of literal ``read_csv_auto`` options
             (``KEY=VALUE`` form). Empty string omits options.
 
@@ -268,7 +268,7 @@ def read_parquet_expr(escaped_path: str) -> str:
 
     Args:
         escaped_path: A path already escaped via
-            :func:`~jqr.database.utils.path_validation.escape_path_for_sql`.
+            :func:`~ducktide.utils.path_validation.escape_path_for_sql`.
 
     Returns:
         The ``read_parquet`` table-valued expression usable in a ``FROM`` clause.

@@ -1,6 +1,6 @@
-"""Tests for the jqr.database.utils.sql SQL statement builders.
+"""Tests for the ducktide.utils.sql SQL statement builders.
 
-Most SQL builder helpers in ``jqr.database.utils.sql`` are pure string factories
+Most SQL builder helpers in ``ducktide.utils.sql`` are pure string factories
 exercised end-to-end through the table and time-series database tests (every
 generated statement is executed there against DuckDB). The behavioural coverage
 for those lives in the callers' tests.
@@ -16,8 +16,8 @@ mirror of source classes that do not exist (see ``[tool.check_test_layout]``).
 
 import pytest
 
-from jqr.database.exceptions import ValidationError
-from jqr.database.utils import sql
+from ducktide.exceptions import ValidationError
+from ducktide.utils import sql
 
 # ── validate_identifier: the single audited identifier validator ──────────────
 
