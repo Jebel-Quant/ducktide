@@ -81,3 +81,4 @@ DEP002 = ["pyarrow"]
 [tool.rhiza-task]
 # Match [tool.coverage.report] fail_under; the task's default of 90 overrides it on the CLI.
 coverage-fail-under = 100
+marimo-folder = "book/marimo/notebooks"
