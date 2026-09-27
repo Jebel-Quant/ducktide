@@ -13,7 +13,7 @@ from pydantic import BaseModel
 
 from ducktide.exceptions import QueryError
 from ducktide.table import Table
-from ducktide.table._write import _BULK_SOURCE, _arrow_compatible
+from ducktide.table._write import _BULK_SOURCE, _arrow_compatible, _uuids_as_text
 
 from .conftest import MockModel
 
@@ -59,10 +59,17 @@ def _assert_no_open_transaction(connection):
 
 
 class TokenModel(BaseModel):
-    """A model with a UUID column, which Polars cannot hand to DuckDB via Arrow."""
+    """A model with a nullable UUID column, which bulk_insert sends to DuckDB as text."""
 
     id: int
-    token: uuid.UUID
+    token: uuid.UUID | None = None
+
+
+class BigModel(BaseModel):
+    """A model whose HUGEINT column takes values Polars cannot hand to DuckDB via Arrow."""
+
+    id: int
+    big: int
 
 
 class LooseModel(BaseModel):
@@ -74,8 +81,19 @@ class LooseModel(BaseModel):
 
 @pytest.fixture
 def token_table(connection):
-    """Provide a Table whose rows take the executemany fallback path."""
+    """Provide a Table with a UUID column."""
     return Table(connection, TokenModel, name="token")
+
+
+@pytest.fixture
+def big_table(connection):
+    """Provide a Table whose rows beyond 64 bits take the executemany fallback path."""
+    return Table(connection, BigModel, name="big", sql_types={"big": "HUGEINT NOT NULL"})
+
+
+def _big(id: int) -> BigModel:  # noqa: A002 - mirrors the DB primary-key column `id`
+    """Return a BigModel whose value only fits in 128 bits."""
+    return BigModel(id=id, big=2**70 + id)
 
 
 @pytest.fixture
@@ -200,13 +218,30 @@ class TestWriteMixin:
         with pytest.raises(duckdb.CatalogException):
             table.connection.execute(f"SELECT * FROM {_BULK_SOURCE}")  # noqa: S608 - constant relation name
 
-    def test_bulk_insert_falls_back_for_non_arrow_values(self, token_table):
-        """Values Polars cannot hand to DuckDB (UUIDs) go through executemany."""
-        tokens = [uuid.UUID(int=1), uuid.UUID(int=2)]
-        assert token_table._frame_from_values([(1, tokens[0]), (2, tokens[1])]) is None
+    def test_bulk_insert_sends_uuids_as_text(self, token_table):
+        """A UUID column takes the frame path as text and reads back as UUIDs, NULLs included."""
+        tokens = [uuid.UUID(int=1), None, uuid.uuid4()]
+        frame = token_table._frame_from_values([(i, t) for i, t in enumerate(tokens)])
+        assert frame is not None
+        assert frame.schema["token"] == pl.String
 
-        token_table.bulk_insert([TokenModel(id=1, token=tokens[0]), TokenModel(id=2, token=tokens[1])])
+        token_table.bulk_insert([TokenModel(id=i, token=t) for i, t in enumerate(tokens)])
         assert [t.token for t in token_table.select()] == tokens
+
+    def test_bulk_insert_uuid_into_varchar_is_canonical_text(self, connection):
+        """Into a VARCHAR column a UUID lands as its canonical string, as a bound parameter would."""
+        table = Table(connection, TokenModel, name="token_text", sql_types={"token": "VARCHAR"})
+        token = uuid.UUID(int=0xABC)
+        table.bulk_insert([TokenModel(id=1, token=token), TokenModel(id=2)])
+
+        assert connection.execute("SELECT token FROM token_text ORDER BY id").fetchall() == [(str(token),), (None,)]
+
+    def test_bulk_insert_falls_back_for_non_arrow_values(self, big_table):
+        """Values Polars cannot hand to DuckDB (ints beyond 64 bits) go through executemany."""
+        assert big_table._frame_from_values([(1, 2**70)]) is None
+
+        big_table.bulk_insert([_big(1), _big(2)])
+        assert [m.big for m in big_table.select()] == [2**70 + 1, 2**70 + 2]
 
     def test_bulk_insert_falls_back_for_mixed_types(self, loose_table):
         """A column mixing incompatible Python types falls back and is cast by DuckDB."""
@@ -215,28 +250,32 @@ class TestWriteMixin:
         loose_table.bulk_insert([LooseModel(id=1, value=7), LooseModel(id=2, value="b")])
         assert [m.value for m in loose_table.select()] == ["7", "b"]
 
-    def test_bulk_insert_fallback_is_atomic(self, token_table):
-        """The executemany fallback keeps the all-or-nothing guarantee."""
-        token_table.insert(TokenModel(id=1, token=uuid.UUID(int=1)))
-        with pytest.raises(QueryError, match="Constraint violation inserting into 'token'"):
-            token_table.bulk_insert(
-                [TokenModel(id=2, token=uuid.UUID(int=2)), TokenModel(id=1, token=uuid.UUID(int=3))]
-            )
-        assert len(token_table) == 1
+    def test_bulk_insert_falls_back_for_uuids_mixed_with_other_values(self, loose_table):
+        """UUIDs are only sent as text when every non-null value in the column is one."""
+        token = uuid.UUID(int=5)
+        assert loose_table._frame_from_values([(1, token), (2, "b")]) is None
 
-    def test_bulk_insert_fallback_rolls_back_on_non_constraint_error(self, token_table, monkeypatch):
+        loose_table.bulk_insert([LooseModel(id=1, value=token), LooseModel(id=2, value="b")])
+        assert [m.value for m in loose_table.select()] == [str(token), "b"]
+
+    def test_bulk_insert_fallback_is_atomic(self, big_table):
+        """The executemany fallback keeps the all-or-nothing guarantee."""
+        big_table.insert(_big(1))
+        with pytest.raises(QueryError, match="Constraint violation inserting into 'big'"):
+            big_table.bulk_insert([_big(2), _big(1)])
+        assert len(big_table) == 1
+
+    def test_bulk_insert_fallback_rolls_back_on_non_constraint_error(self, big_table, monkeypatch):
         """A non-constraint failure on the fallback path also rolls back."""
-        monkeypatch.setattr(token_table, "connection", _FailingInsert(token_table.connection))
+        monkeypatch.setattr(big_table, "connection", _FailingInsert(big_table.connection))
         with pytest.raises(RuntimeError, match="connection lost"):
-            token_table.bulk_insert(
-                [TokenModel(id=1, token=uuid.UUID(int=1)), TokenModel(id=2, token=uuid.UUID(int=2))]
-            )
+            big_table.bulk_insert([_big(1), _big(2)])
         monkeypatch.undo()
 
-        _assert_no_open_transaction(token_table.connection)
-        assert len(token_table) == 0
-        token_table.insert(TokenModel(id=3, token=uuid.UUID(int=3)))
-        assert len(token_table) == 1
+        _assert_no_open_transaction(big_table.connection)
+        assert len(big_table) == 0
+        big_table.insert(_big(3))
+        assert len(big_table) == 1
 
 
 @pytest.mark.parametrize(
@@ -256,3 +295,19 @@ class TestWriteMixin:
 def test_arrow_compatible(dtype, expected):
     """Dtypes DuckDB cannot read over Arrow are rejected, however deeply nested."""
     assert _arrow_compatible(dtype) is expected
+
+
+@pytest.mark.parametrize(
+    ("column", "expected"),
+    [
+        ([uuid.UUID(int=1), None], ["00000000-0000-0000-0000-000000000001", None]),
+        ([None, None], [None, None]),
+        ([], []),
+        ([uuid.UUID(int=1), "b"], [uuid.UUID(int=1), "b"]),
+        (["a", uuid.UUID(int=1)], ["a", uuid.UUID(int=1)]),
+        ([[uuid.UUID(int=1)]], [[uuid.UUID(int=1)]]),
+    ],
+)
+def test_uuids_as_text(column, expected):
+    """Only a column of nothing but UUIDs (and NULLs) is converted; anything else is left as given."""
+    assert _uuids_as_text(column) == expected

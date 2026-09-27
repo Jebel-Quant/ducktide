@@ -8,6 +8,7 @@ statement per row, which is orders of magnitude slower.
 
 from collections.abc import Iterable
 from typing import Any
+from uuid import UUID
 
 import duckdb
 import polars as pl
@@ -40,6 +41,27 @@ def _arrow_compatible(dtype: pl.DataType | DataTypeClass) -> bool:
     if isinstance(dtype, pl.List | pl.Array):
         return _arrow_compatible(dtype.inner)
     return not any(dtype == bad for bad in _NON_ARROW_DTYPES)
+
+
+def _uuids_as_text(column: list[Any]) -> list[Any]:
+    """Return a UUID column as canonical strings, or the column unchanged.
+
+    Polars has no UUID dtype and would hold UUIDs as ``Object``, which cannot
+    reach DuckDB. As text they travel over Arrow, and DuckDB casts them back on
+    insert: into a ``UUID`` column exactly, and into a ``VARCHAR`` column as the
+    same canonical string a bound UUID parameter would produce.
+
+    Args:
+        column: One column's values; ``None`` marks a NULL.
+
+    Returns:
+        The column with every UUID replaced by ``str(uuid)`` if all its non-null
+        values are UUIDs, else the column as given.
+    """
+    first = next((value for value in column if value is not None), None)
+    if not isinstance(first, UUID) or not all(value is None or isinstance(value, UUID) for value in column):
+        return column
+    return [None if value is None else str(value) for value in column]
 
 
 class WriteMixin(TableBase):
@@ -135,8 +157,9 @@ class WriteMixin(TableBase):
                 remain in the table.
 
         Performance:
-            Values Polars cannot hand to DuckDB (e.g. UUIDs, ints beyond 64
-            bits, or a column mixing incompatible types) fall back to
+            UUID columns are sent as text and cast back by DuckDB. Values
+            Polars cannot hand to DuckDB (ints beyond 64 bits, nested UUIDs,
+            or a column mixing incompatible types) fall back to
             ``executemany``, which is correct but runs one statement per row.
 
         Atomicity:
@@ -182,9 +205,10 @@ class WriteMixin(TableBase):
         Returns:
             The DataFrame, or None when a column has values Polars cannot
             represent in a form DuckDB can read (inference fails, or yields a
-            dtype in ``_NON_ARROW_DTYPES``).
+            dtype in ``_NON_ARROW_DTYPES``). UUID columns are sent as text; see
+            :func:`_uuids_as_text`.
         """
-        data = {col: [row[i] for row in values] for i, col in enumerate(self.columns)}
+        data = {col: _uuids_as_text([row[i] for row in values]) for i, col in enumerate(self.columns)}
         try:
             frame = pl.DataFrame(data, strict=True)
         except (TypeError, ValueError, OverflowError, pl.exceptions.PolarsError):
