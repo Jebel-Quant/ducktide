@@ -11,3 +11,6 @@ nav:
   - Home: index.md
   - Development:
       - Rhiza: development/rhiza.md
+  - Notebooks:
+      - Database demo: notebooks/database_demo.html
+      - Example: notebooks/example.html
