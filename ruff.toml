@@ -137,20 +137,12 @@ line-ending = "auto"
 # Project test suite only — allowances the broader glob above should not hand to the
 # bundle copies under bundles/
 "tests/**/*.py" = [
-    "A002",    # mock models mirror DB schemas whose primary-key column is named `id`
     "RUF002",  # docstrings quote prose with typographic unicode (e.g. en dash)
     "RUF012",  # pytest class attributes are conventionally bare mutables, not ClassVar
-]
-# Standalone example/demo scripts under examples/ — illustrative, not shipped API
-"examples/**/*.py" = [
-    "ANN",   # demos prioritize readability over strict annotation coverage
-    "ARG",   # demo signatures mirror real APIs even when an argument goes unused
-    "BLE",   # resilient batch demos log-and-continue on any error by design
 ]
 # Marimo notebooks - allow flexible coding patterns for interactive exploration
 "**/notebooks/*.py" = [
     "ANN",     # notebooks prioritize interactive readability over strict annotation coverage
-    "ARG",     # marimo injects cell dependencies as function args that may go unused
     "D100",    # No module docstring - marimo requires `import marimo` as the first statement
     "N803",    # Allow non-lowercase variable names in notebooks
     "S101",    # Allow assert statements in notebooks
