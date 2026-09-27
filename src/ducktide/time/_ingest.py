@@ -92,7 +92,10 @@ class TimeSeriesIngestMixin(TimeSeriesBase):
         if on_conflict not in ("update", "ignore"):
             raise ValidationError(f"on_conflict must be 'update' or 'ignore', got {on_conflict!r}")  # noqa: TRY003
         key_cols = self._key_columns(frame, key)
-        frame = frame.unique(subset=key_cols, keep="last", maintain_order=True)
+        # Checking for duplicate keys costs a fifth of removing them, and most
+        # frames have none, so only pay for the order-preserving unique() then.
+        if frame.select(key_cols).is_duplicated().any():
+            frame = frame.unique(subset=key_cols, keep="last", maintain_order=True)
         self._ensure_schema(table)
 
         if not self.has_table(table):
