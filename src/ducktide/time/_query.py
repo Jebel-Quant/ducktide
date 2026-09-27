@@ -79,7 +79,7 @@ class TimeSeriesQueryMixin(TimeSeriesBase):
             graceful degradation should catch QueryError explicitly.
         """
         self._validate_table_name(table)
-        if table not in self.tables():
+        if not self.has_table(table):
             return pl.DataFrame()
 
         try:
