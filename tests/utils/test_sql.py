@@ -120,3 +120,10 @@ def test_merge_upsert_null_safe_keys() -> None:
     """Only the key columns named in null_safe compare with IS NOT DISTINCT FROM."""
     statement = sql.merge_upsert("t", "s", ["id", "ts"], ["id", "ts", "v"], update=True, null_safe=["id"])
     assert 'ON (t."id" IS NOT DISTINCT FROM s."id" AND t."ts" = s."ts")' in statement
+
+
+def test_ordered_by_quotes_columns_and_puts_nulls_first() -> None:
+    """Each sort column is quoted and ascending with NULLs first, matching get_timeseries_frame."""
+    assert (
+        sql.ordered_by(["instrument_id", 'odd"name']) == '"instrument_id" ASC NULLS FIRST, "odd""name" ASC NULLS FIRST'
+    )

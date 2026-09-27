@@ -29,7 +29,7 @@ Prefer bare `make <target>`; never call `.venv/bin/…` directly. `make help` li
   `_query` (reads), `_write` (writes) and `_io` (Parquet/CSV import/export).
 - `model.py` — `DomainModel` (optional frozen base) and `column_definitions`, which derives a table's
   columns and DuckDB types from a Pydantic model's fields. `example.py` holds the sample `Foo` model.
-- `time/` — `TimeSeriesDB` (time series store; `ingest` upserts on a series key), `TimeSeriesModel`,
+- `time/` — `TimeSeriesDB` (time series store; `ingest` upserts on a series key, `compact` regroups by it), `TimeSeriesModel`,
   `TimeSeriesRepository`, split into `_base`, `_ingest`, `_query`, `_io`.
 - `context.py` — `use_db`/`get_default_db`, a ContextVar-scoped default database.
 - `exceptions.py` — the exception hierarchy.

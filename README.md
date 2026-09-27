@@ -122,6 +122,18 @@ The key is the timestamp plus `instrument_id` when the frame has one; pass
 The timestamp column defaults to `timestamp`; pass `TimeSeriesDB(time_col="ts")`
 to change it.
 
+Ingestion stores rows in arrival order, which spreads each instrument across the
+whole table. `compact` rewrites a table grouped by the same key, so a read for
+one instrument can skip most of it. On 1M daily bars for 500 instruments,
+`get_timeseries_frame` for one instrument over one year drops from about 1.1 ms
+to 0.75 ms, while full-table aggregates get somewhat slower (0.65 ms to
+0.9 ms). New ingests land unsorted again, so compact periodically, e.g. after
+each day's ingest:
+
+```python
+ts.compact("prices")  # or ts.compact("fx", key=["base", "quote"])
+```
+
 ## Default database context
 
 For notebooks and tests you can scope a default database instead of passing it

@@ -1,10 +1,12 @@
-"""Ingestion (upsert on a series key) for the time-series interface.
+"""Ingestion (upsert on a series key) and compaction for the time-series interface.
 
 This module defines :class:`TimeSeriesIngestMixin`, which creates tables on
 first write and afterwards upserts: an incoming row whose key (the series
 columns plus the timestamp) is already stored replaces it, and any other row is
 inserted, whatever its timestamp. Re-ingesting an overlapping frame is safe,
 and late-arriving rows and corrections land instead of being dropped.
+``compact`` rewrites a table grouped by the same key, which speeds up reads
+for a single series.
 """
 
 import logging
@@ -23,6 +25,8 @@ logger = logging.getLogger(__name__)
 _DEFAULT_SERIES_COL = "instrument_id"
 # Name under which the incoming batch is registered for one MERGE.
 _INGEST_SOURCE = "__ducktide_ingest"
+# Temporary table holding the sorted copy during one compaction.
+_COMPACT_SCRATCH = "__ducktide_compact"
 
 
 class TimeSeriesIngestMixin(TimeSeriesBase):
@@ -94,7 +98,7 @@ class TimeSeriesIngestMixin(TimeSeriesBase):
         # pays per chunk: a 500-row frame from 500 one-row frames ingests ~20x
         # slower. Rechunking costs ~1 ms then and nothing for a contiguous frame.
         frame = frame.rechunk()
-        key_cols = self._key_columns(frame, key)
+        key_cols = self._key_columns(frame.columns, key, source="frame")
         # Checking for duplicate keys costs a fifth of removing them, and most
         # frames have none, so only pay for the order-preserving unique() then.
         if frame.select(key_cols).is_duplicated().any():
@@ -122,30 +126,100 @@ class TimeSeriesIngestMixin(TimeSeriesBase):
         finally:
             self.con.unregister(_INGEST_SOURCE)
 
-    def _key_columns(self, frame: pl.DataFrame, key: Sequence[str] | None) -> list[str]:
-        """Resolve the full upsert key: the series columns plus the timestamp column.
+    def compact(self, table: str, *, key: Sequence[str] | None = None) -> None:
+        """Rewrite a table grouped by series, so reads for one series skip most of it.
+
+        DuckDB skips blocks of rows whose min/max show they cannot match a
+        filter. Ingestion appends in arrival order, typically time order, which
+        spreads every series across the whole table, so a read for one
+        instrument has to scan nearly all of it. Compacting stores the rows
+        sorted by the series key, then the timestamp; on 1M daily bars for 500
+        instruments a one-instrument, one-year read drops from about 1.1 ms to
+        0.75 ms, while full-table aggregates get somewhat slower (0.65 ms to
+        0.9 ms).
+        New ingests land unsorted again, so compact periodically (e.g. after a
+        day's ingest), not after every write.
+
+        The table is emptied and refilled inside one transaction, so its
+        schema, constraints, defaults and dependent views are kept, and a
+        failure leaves it exactly as it was.
 
         Args:
-            frame: The incoming DataFrame.
+            table: The table to compact. May be schema-qualified as "schema.table".
+            key: The series columns to group by, as for :meth:`ingest`; the
+                timestamp column is added automatically. Defaults to
+                ``["instrument_id"]`` when the table has that column.
+
+        Examples:
+            >>> import polars as pl
+            >>> from datetime import date
+            >>> from ducktide.time import TimeSeriesDB
+            >>>
+            >>> ts_db = TimeSeriesDB()
+            >>> day = {"instrument_id": [2, 1], "close": [20.0, 10.0]}
+            >>> ts_db.ingest("prices", pl.DataFrame({**day, "timestamp": [date(2025, 1, 1)] * 2}))
+            >>> ts_db.ingest("prices", pl.DataFrame({**day, "timestamp": [date(2025, 1, 2)] * 2}))
+            >>> ts_db.compact("prices")
+            >>> ts_db.query("SELECT instrument_id FROM prices ORDER BY rowid")["instrument_id"].to_list()
+            [1, 1, 2, 2]
+
+        Raises:
+            ValidationError: If the table name is not a valid SQL identifier or
+                the table lacks a key column.
+
+        Note:
+            A missing table is a no-op, as for :meth:`get_timeseries_frame`.
+            DuckDB reuses the space freed by a compaction for later writes but
+            does not shrink the file, which settles at a few times the data
+            size.
+        """
+        self._validate_table_name(table)
+        if not self.has_table(table):
+            return
+        quoted_table = self._quote_identifier(table)
+        key_cols = self._key_columns(self.con.table(quoted_table).columns, key, source=f"table '{table}'")
+
+        logger.info("Compacting '%s' on %s...", table, key_cols)
+        self.con.begin()
+        try:
+            self.con.execute(
+                sql.create_temp_table_as(
+                    _COMPACT_SCRATCH, sql.select_ordered(quoted_table, order_by=sql.ordered_by(key_cols))
+                )
+            )
+            self.con.execute(sql.delete_all(quoted_table))
+            self.con.execute(sql.insert_from_query(quoted_table, sql.select_all(_COMPACT_SCRATCH)))
+            self.con.execute(sql.drop_table_if_exists(_COMPACT_SCRATCH))
+        except Exception:
+            self.con.rollback()
+            raise
+        self.con.commit()
+
+    def _key_columns(self, columns: Sequence[str], key: Sequence[str] | None, *, source: str) -> list[str]:
+        """Resolve the full series key: the series columns plus the timestamp column.
+
+        Args:
+            columns: The columns available (a frame's or a table's).
             key: The caller's series columns, or None for the default.
+            source: What ``columns`` belong to, for the error message.
 
         Returns:
             The key columns, series columns first, timestamp last.
 
         Raises:
-            ValidationError: If the timestamp column or a key column is missing
-                from the frame, or ``key`` repeats a column.
+            ValidationError: If the timestamp column or a key column is not in
+                ``columns``, or ``key`` repeats a column.
         """
         if key is None:
-            series = [_DEFAULT_SERIES_COL] if _DEFAULT_SERIES_COL in frame.columns else []
+            series = [_DEFAULT_SERIES_COL] if _DEFAULT_SERIES_COL in columns else []
         else:
             series = [col for col in key if col != self.time_col]
         key_cols = [*series, self.time_col]
         if len(set(key_cols)) != len(key_cols):
             raise ValidationError(f"key repeats a column: {list(key or [])}")  # noqa: TRY003
-        missing = [col for col in key_cols if col not in frame.columns]
+        missing = [col for col in key_cols if col not in columns]
         if missing:
-            raise ValidationError(f"frame is missing key column(s): {', '.join(missing)}")  # noqa: TRY003
+            raise ValidationError(f"{source} is missing key column(s): {', '.join(missing)}")  # noqa: TRY003
         return key_cols
 
     def _ensure_schema(self, table: str) -> None:
