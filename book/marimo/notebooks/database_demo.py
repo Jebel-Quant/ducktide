@@ -122,7 +122,7 @@ def cell_section2_header(mo):
 
 
 @app.cell
-def cell_init_db(Trade, TradeTable):
+def cell_init_db(TradeTable):
     """Initialize the database with the custom table."""
     # ducktide.DB takes a map of {attribute_name: table_cls}
     # where table_cls is a class that can be initialized with (connection, read_only=...)
@@ -176,7 +176,7 @@ def cell_query_data(db):
 
 
 @app.cell
-def cell_display_trades(mo, all_trades):
+def cell_display_trades(all_trades):
     """Display the queried trades."""
     print(all_trades)
     return
