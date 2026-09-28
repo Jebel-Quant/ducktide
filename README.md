@@ -28,6 +28,40 @@ ducktide is a small persistence layer with two halves:
 Both run on DuckDB (in-memory or a single file) and hand data back as Polars
 DataFrames. There is no SQLAlchemy and no server.
 
+## Why not DuckDB directly?
+
+Fair question. DuckDB does the actual work here: storage, the query engine,
+`MERGE`, Parquet and CSV, the zero-copy hand-off to Polars. ducktide is candy
+on top of the DuckDB cake. You could write all of it yourself in an afternoon
+of SQL strings. The candy is still worth having, because it spares you that
+afternoon and the bugs that come with it:
+
+- **One definition of a table.** The Pydantic model is the schema. Columns,
+  DuckDB types and `NOT NULL` come from its fields, so there is no `CREATE
+  TABLE` to keep in sync with a class by hand.
+- **Typed rows back, not tuples.** Reads return validated, frozen model
+  instances (or a Polars frame when you want one), so the code that uses the
+  data gets type checking and never indexes `row[3]`.
+- **Upserts that are easy to get wrong, done once.** `ingest` turns a frame into
+  a `MERGE` on the series key. It drops duplicate keys inside the frame (last
+  row wins), matches `NULL` keys to stored `NULL`s instead of duplicating them,
+  creates the table on the first write and lets late rows and corrections land.
+  Written by hand, each of those is a subtle bug waiting to happen.
+- **The performance traps are already stepped around.** Frames built with
+  `pl.concat` are rechunked before ingest (about 20x faster on fragmented
+  frames), `bulk_insert` hands DuckDB one frame rather than running
+  `executemany` row by row, and UUID columns are sent as text so they still
+  take that fast path. `compact` regroups a table by key when single-series
+  reads dominate.
+- **No SQL injection through names.** Table and column names are validated and
+  quoted in one module; values always travel as bound parameters.
+- **Your domain objects stay plain values.** Models carry no `save()` or
+  `find()`; persistence lives in `Table`, so the same model works in tests,
+  in memory and on disk.
+
+When you need something ducktide does not cover, the DuckDB connection is right
+there (`db.connection`, `ts.con`), and plain SQL still works on the same tables.
+
 ## Install
 
 ```bash
