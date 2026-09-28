@@ -84,9 +84,8 @@ class TimeSeriesIngestMixin(TimeSeriesBase):
                 ``on_conflict`` is not ``"update"`` or ``"ignore"``.
 
         Note:
-            Within one frame, the last row for a key wins. Key columns compare
-            with ``IS NOT DISTINCT FROM``, so a NULL key matches a stored NULL
-            key instead of inserting a duplicate.
+            Within one frame, the last row for a key wins. A NULL key value
+            matches a stored NULL instead of inserting a duplicate.
         """
         self._validate_table_name(table)
         if on_conflict not in ("update", "ignore"):
@@ -110,7 +109,12 @@ class TimeSeriesIngestMixin(TimeSeriesBase):
 
         logger.info("Upserting %d rows into '%s' on %s...", frame.height, table, key_cols)
         statement = sql.merge_upsert(
-            self._quote_identifier(table), _INGEST_SOURCE, key_cols, frame.columns, update=on_conflict == "update"
+            self._quote_identifier(table),
+            _INGEST_SOURCE,
+            key_cols,
+            frame.columns,
+            update=on_conflict == "update",
+            null_safe=[col for col in key_cols if frame[col].null_count()],
         )
         self.con.register(_INGEST_SOURCE, frame)
         try:
