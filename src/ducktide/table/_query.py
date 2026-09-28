@@ -72,9 +72,9 @@ class QueryMixin(TableBase):
         for name, value in filters.items():
             column, op = self._resolve_filter(name)
             if value is None and op == "=":
-                conditions.append(f"{column} IS NULL")
+                conditions.append(f"{sql.quote_column(column)} IS NULL")
             else:
-                conditions.append(f"{column} {op} ?")
+                conditions.append(f"{sql.quote_column(column)} {op} ?")
                 params.append(value)
 
         return conditions, params
@@ -189,7 +189,7 @@ class QueryMixin(TableBase):
             raise ValidationError(  # noqa: TRY003
                 f"Unknown column '{key}' for table '{self.table_name}'. Valid columns: {', '.join(self.columns)}"
             )
-        result = self.select(f"{key} = ?", [value])
+        result = self.select(f"{sql.quote_column(key)} = ?", [value])
         return self._get_single_result(result, key, value)
 
     def get(self, id: int | None = None) -> Any:  # noqa: A002 — public API: look up a row by its primary-key `id`
@@ -207,7 +207,7 @@ class QueryMixin(TableBase):
         if id is None:
             return None
 
-        result = self.select(f"{self.pk} = ?", [id])
+        result = self.select(f"{sql.quote_column(self.pk)} = ?", [id])
         return self._get_single_result(result, self.pk, id)
 
     @property
@@ -253,7 +253,7 @@ class QueryMixin(TableBase):
         Raises:
             KeyError: If no row is found for the given primary key.
         """
-        result = self.select(f"{self.pk} = ?", [key])
+        result = self.select(f"{sql.quote_column(self.pk)} = ?", [key])
         if len(result) == 0:
             raise KeyError(f"No row found for {self.pk} = {key}")  # noqa: TRY003
 

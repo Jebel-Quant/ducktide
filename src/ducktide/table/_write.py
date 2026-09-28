@@ -108,7 +108,7 @@ class WriteMixin(TableBase):
             # Single row insert
             obj = objs[0]
             placeholders = ", ".join("?" for _ in self.columns)
-            cols = ", ".join(self.columns)
+            cols = ", ".join(sql.quote_column(col) for col in self.columns)
             # table_name and column names come from the ORM model class definition
             # (code, not user data); row values are bound via placeholders below.
             statement = sql.insert_row(self.table_name, cols, placeholders)
@@ -173,7 +173,7 @@ class WriteMixin(TableBase):
         if not objs:
             return
 
-        cols = ", ".join(self.columns)
+        cols = ", ".join(sql.quote_column(col) for col in self.columns)
         values = [self._values_from_obj(obj) for obj in objs]
         frame = self._frame_from_values(values)
 
