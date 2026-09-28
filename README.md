@@ -4,7 +4,7 @@
 
 [![rhiza v1.8.0](https://img.shields.io/badge/rhiza-v1.8.0-blue)](https://github.com/jebel-quant/rhiza/releases/tag/v1.8.0)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![Python versions](https://img.shields.io/badge/Python-3.11 • 3.12 • 3.13 • 3.14-blue?logo=python)](https://www.python.org/)
+[![Python versions](https://img.shields.io/badge/Python-3.11%20%E2%80%A2%203.12%20%E2%80%A2%203.13%20%E2%80%A2%203.14-blue?logo=python)](https://www.python.org/)
 [![CI](https://github.com/Jebel-Quant/ducktide/actions/workflows/rhiza_ci.yml/badge.svg?event=push)](https://github.com/Jebel-Quant/ducktide/actions/workflows/rhiza_ci.yml)
 [![Code style: ruff](https://img.shields.io/badge/code%20style-ruff-000000.svg?logo=ruff)](https://github.com/astral-sh/ruff)
 [![uv](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/uv/main/assets/badge/v0.json)](https://github.com/astral-sh/uv)
