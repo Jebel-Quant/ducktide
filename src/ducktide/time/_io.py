@@ -40,6 +40,8 @@ class TimeSeriesIOMixin(TimeSeriesBase):
     def export_csv(self, table: str, csv_path: str | Path) -> None:
         """Export a table to a CSV file.
 
+        A missing parent folder is created.
+
         Args:
             table: Name of the table to export.
             csv_path: Path to the output CSV file.
@@ -53,6 +55,7 @@ class TimeSeriesIOMixin(TimeSeriesBase):
             raise QueryError(f"Table '{table}' does not exist")  # noqa: TRY003
 
         validated_path = validate_file_path(csv_path)
+        validated_path.parent.mkdir(parents=True, exist_ok=True)
         escaped_path = escape_path_for_sql(validated_path)
         table_q = self._quote_identifier(table)
         # table_q is _quote_identifier output from a validated name, escaped_path
@@ -84,6 +87,8 @@ class TimeSeriesIOMixin(TimeSeriesBase):
     def export_parquet(self, table: str, pq_path: str | Path) -> None:
         """Export a table to a Parquet file.
 
+        A missing parent folder is created.
+
         Args:
             table: Name of the table to export.
             pq_path: Path to the output Parquet file.
@@ -97,6 +102,7 @@ class TimeSeriesIOMixin(TimeSeriesBase):
             raise QueryError(f"Table '{table}' does not exist")  # noqa: TRY003
 
         validated_path = validate_file_path(pq_path)
+        validated_path.parent.mkdir(parents=True, exist_ok=True)
         escaped_path = escape_path_for_sql(validated_path)
         table_q = self._quote_identifier(table)
         # table_q is _quote_identifier output from a validated name, escaped_path
