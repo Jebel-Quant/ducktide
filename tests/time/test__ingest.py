@@ -9,7 +9,7 @@ import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
-from ducktide.exceptions import ValidationError
+from ducktide.exceptions import DatabaseError, ValidationError
 from ducktide.time import TimeSeriesDB
 
 timestamp_lists = st.lists(
@@ -701,3 +701,19 @@ class TestCompact:
             with pytest.raises(Exception, match=r"(?i)read-only|read_only"):
                 db.compact("prices")
             assert db.get_timeseries_frame("prices").height == sample_frame.height
+
+
+class TestReadOnly:
+    """A read-only store refuses ingest and compact with a ducktide error."""
+
+    def test_ingest_and_compact_are_refused(self, tmp_path):
+        """Ingest and compact raise DatabaseError, not DuckDB's InvalidInputException."""
+        path = tmp_path / "ro.duckdb"
+        with TimeSeriesDB(path) as writable:
+            writable.ingest("prices", make_frame([datetime(2025, 1, 2)]))
+        with TimeSeriesDB(path, read_only=True) as ro:
+            with pytest.raises(DatabaseError, match="read-only: ingest"):
+                ro.ingest("prices", make_frame([datetime(2025, 1, 3)]))
+            with pytest.raises(DatabaseError, match="read-only: compact"):
+                ro.compact("prices")
+            assert ro.get_timeseries_frame("prices").height == 1

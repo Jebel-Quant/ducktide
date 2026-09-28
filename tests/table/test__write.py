@@ -11,7 +11,7 @@ import polars as pl
 import pytest
 from pydantic import BaseModel
 
-from ducktide.exceptions import QueryError
+from ducktide.exceptions import DatabaseError, QueryError
 from ducktide.table import Table
 from ducktide.table._write import _BULK_SOURCE, _arrow_compatible, _uuids_as_text
 
@@ -311,3 +311,29 @@ def test_arrow_compatible(dtype, expected):
 def test_uuids_as_text(column, expected):
     """Only a column of nothing but UUIDs (and NULLs) is converted; anything else is left as given."""
     assert _uuids_as_text(column) == expected
+
+
+class TestReadOnlyWrites:
+    """A read-only table refuses writes with a ducktide error, before touching DuckDB."""
+
+    def test_insert_and_bulk_insert_are_refused(self, connection):
+        """Insert and bulk_insert raise DatabaseError on a read-only table."""
+        table = Table(connection, MockModel, name="mock_table", read_only=True)
+        with pytest.raises(DatabaseError, match="'mock_table' is read-only: insert"):
+            table.insert(MockModel(id=1))
+        with pytest.raises(DatabaseError, match="'mock_table' is read-only: bulk_insert"):
+            table.bulk_insert([MockModel(id=1), MockModel(id=2)])
+        assert len(table) == 0
+
+    def test_read_only_db_file_refuses_insert(self, tmp_path):
+        """A table on a read-only DuckDB file raises DatabaseError, not DuckDB's InvalidInputException."""
+        from ducktide.db import DB
+
+        path = tmp_path / "ro.duckdb"
+        DB(tables_map={"mock": Table.of(MockModel)}, db_path=path).close()
+        db = DB(tables_map={"mock": Table.of(MockModel)}, db_path=path, read_only=True)
+        try:
+            with pytest.raises(DatabaseError, match="read-only"):
+                db.mock.insert(MockModel(id=1))
+        finally:
+            db.close()

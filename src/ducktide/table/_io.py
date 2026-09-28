@@ -158,6 +158,7 @@ class IOMixin(TableBase):
             FileNotFoundError: If the CSV file doesn't exist.
             ValidationError: If the path is invalid.
         """
+        self._require_writable("from_csv")
         validated_path = validate_file_path(path, must_exist=True)
         escaped_path = escape_path_for_sql(validated_path)
 
@@ -187,6 +188,7 @@ class IOMixin(TableBase):
             FileNotFoundError: If the Parquet file doesn't exist.
             ValidationError: If the path is invalid.
         """
+        self._require_writable("from_parquet")
         validated_path = validate_file_path(path, must_exist=True)
         escaped_path = escape_path_for_sql(validated_path)
 

@@ -28,6 +28,7 @@ class TimeSeriesIOMixin(TimeSeriesBase):
             ValidationError: If the path or table name is invalid.
         """
         self._validate_table_name(table)
+        self._require_writable("import_csv")
         validated_path = validate_file_path(csv_path, must_exist=True)
         escaped_path = escape_path_for_sql(validated_path)
         table_q = self._quote_identifier(table)
@@ -71,6 +72,7 @@ class TimeSeriesIOMixin(TimeSeriesBase):
             ValidationError: If the path or table name is invalid.
         """
         self._validate_table_name(table)
+        self._require_writable("import_parquet")
         validated_path = validate_file_path(pq_path, must_exist=True)
         escaped_path = escape_path_for_sql(validated_path)
         table_q = self._quote_identifier(table)
