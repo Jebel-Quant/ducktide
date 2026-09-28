@@ -5,6 +5,26 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com),
 and entries are generated from [Conventional Commits](https://www.conventionalcommits.org).
 
+## [0.1.0] - 2026-09-28
+
+### New Features
+- [**breaking**] Define a table from a single Pydantic model (#14)
+- [**breaking**] Upsert time-series ingest on a configurable series key (#18)
+- Add TimeSeriesModel.ingest_many for one write per table (#21)
+- Add TimeSeriesDB.compact to regroup a table by series key (#22)
+
+### Documentation
+- URL-encode the Python versions badge so it renders (#23)
+- Add a 'Why not DuckDB directly?' section to the README (#25)
+
+### Performance
+- Bulk-insert via one INSERT ... SELECT, look up single tables (#17)
+- Send UUID columns to bulk_insert's frame path as text (#19)
+- Faster time-series upserts on large tables and concatenated frames (#20)
+
+### Maintenance
+- Update rhiza to v1.9.0 (#24)
+
 ## [0.0.1] - 2026-09-27
 
 ### Bug Fixes
