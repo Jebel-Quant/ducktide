@@ -177,6 +177,79 @@ ingest:
 ts.compact("prices")  # or ts.compact("fx", key=["base", "quote"])
 ```
 
+## Why two databases?
+
+Both halves run on DuckDB. They are split by the shape of the data and by how
+it is read and written, not by engine.
+
+**Reference data** (`DB` + `Table`) is instruments, exchanges, sensors: few
+rows, one per entity, identified by a primary key, rarely changed. The schema
+is declared up front by a Pydantic model that validates every row, and reads
+return typed, frozen objects. For a few thousand rows that is cheap and
+pleasant to work with.
+
+**Time series** (`TimeSeriesDB`) is prices, volumes, readings: millions of
+rows, identified by series key plus timestamp. The schema comes from the first
+frame ingested. Writes are bulk upserts, because corrections and late rows are
+routine. Reads return Polars frames, never objects, since building a million
+Pydantic instances would take seconds and a lot of memory. Row order on disk
+matters for speed, which is what `compact` is for.
+
+Forcing both into one abstraction would hurt one of them: row objects make
+time series slow, and bare frames cost reference data its validation and types.
+
+Keeping them in separate files also pays off:
+
+- **Writers don't block each other.** Only one process can write to a DuckDB
+  file at a time, so a nightly price ingest doesn't lock the instrument table.
+- **Different lifecycles.** Reference data is small and worth backing up or
+  versioning. Time series are large, can usually be re-downloaded from the
+  vendor, and can be rebuilt without touching the definitions.
+- **Read-only fan-out.** Many processes can open the time-series file with
+  `read_only=True` while the reference database stays writable.
+
+`TimeSeriesModel` connects the two. A model loaded from `DB` knows its
+time-series table and its `instrument_id`, and fetches its own frame:
+
+```python
+from datetime import datetime
+from typing import ClassVar
+
+import polars as pl
+
+from ducktide import DB, DomainModel, Table, TimeSeriesDB
+from ducktide.time import TimeSeriesModel
+
+
+class Instrument(DomainModel, TimeSeriesModel):
+    table_name: ClassVar[str] = "prices"
+
+    id: int
+    ticker: str
+    exchange: str
+
+    @property
+    def instrument_id(self) -> int:
+        return self.id
+
+
+ref = DB(tables_map={"instrument": Table.of(Instrument)})  # e.g. db_path="reference.duckdb"
+ts = TimeSeriesDB()  # e.g. TimeSeriesDB("prices.duckdb")
+
+ref.instrument.insert(Instrument(id=1, ticker="ACME", exchange="XNYS"))
+ts.ingest(
+    "prices",
+    pl.DataFrame({"timestamp": [datetime(2025, 1, 1, 9, 0)], "instrument_id": [1], "close": [100.0]}),
+)
+
+acme = ref.instrument.get(1)  # an Instrument, from the reference database
+acme.get_timeseries_frame(ts)  # its prices, from the time-series database
+```
+
+The trade-off: a SQL join across the two, such as all prices for instruments
+on one exchange, needs DuckDB's `ATTACH` or a Polars join. In practice you pick
+the instruments in the reference database first, then read their series.
+
 ## Default database context
 
 For notebooks and tests you can scope a default database instead of passing it
@@ -187,136 +260,6 @@ from ducktide.context import use_db
 
 with use_db(db):
     ...  # code that calls ducktide.context.get_default_db()
-```
-
-## Development
-
-```bash
-uv sync --group test
-uv run pytest
-```
-
-Run `make help` to see all available targets:
-
-```text
- task                section         needs                 does
- book                Book            test benchmark        build the companion
-                                     stress                book
-                                     hypothesis-test
-                                     paper
- book-nav            Book                                  check that every
-                                                           mkdocs nav entry
-                                                           resolves in the
-                                                           built book
- marimo              Book            install               start the Marimo
-                                                           editor
- marimo-validate     Book            install               check that every
-                                                           Marimo notebook runs
- serve               Book            book                  build the book and
-                                                           serve it on port
-                                                           8000
- clean               Dev                                   remove build
-                                                           artifacts and stale
-                                                           local branches
- doctor              Dev                                   check local
-                                                           prerequisites
- setup               Dev                                   run the repository's
-                                                           own environment
-                                                           setup hook
- docker-build        Docker                                build the Docker
-                                                           image
- docker-clean        Docker                                remove the Docker
-                                                           image
- docker-run          Docker          docker-build          run the Docker
-                                                           container
- lfs-install         Git LFS                               configure git-lfs
-                                                           for this repository
- lfs-pull            Git LFS                               download the LFS
-                                                           files for the
-                                                           current branch
- lfs-status          Git LFS                               show the status of
-                                                           LFS files
- lfs-track           Git LFS                               list the patterns
-                                                           tracked by git-lfs
- failed-workflows    GitHub Helpers                        list recent failing
-                                                           workflow runs
- latest-release      GitHub Helpers                        show information
-                                                           about the latest
-                                                           GitHub release
- view-issues         GitHub Helpers                        list open issues
- view-prs            GitHub Helpers                        list open pull
-                                                           requests
- whoami              GitHub Helpers                        check github auth
-                                                           status
- workflow-status     GitHub Helpers                        show recent runs for
-                                                           the release workflow
- paper               Paper                                 compile the LaTeX
-                                                           paper to PDF
- paper-clean         Paper                                 remove the LaTeX
-                                                           build artifacts
- presentation        Presentation                          generate the HTML
-                                                           slides with Marp
- presentation-pdf    Presentation                          generate the PDF
-                                                           slides with Marp
- presentation-serve  Presentation                          serve the slides
-                                                           with Marp's live
-                                                           preview
- all                 Python          fmt deps test         run every gate, as
-                                     docs-coverage         CI does
-                                     security license
-                                     typecheck rhiza-test
- coverage            Python          install               measure coverage and
-                                                           write
-                                                           _tests/coverage.xml
- deps                Python          install               run deptry over the
-                                                           contributed folders
- docs-coverage       Python          install               check docstring
-                                                           coverage with
-                                                           interrogate
- install             Python          setup                 create the venv and
-                                                           sync dependencies
- license             Python          install               scan for copyleft
-                                                           licences
- security            Python          install               run the bandit
-                                                           security scan
- test                Python          install               run all tests
- test-lowest         Python          install               run the tests
-                                                           against the oldest
-                                                           dependencies the
-                                                           manifest allows
- typecheck           Python          install               run ty and/or mypy
-                                                           (typechecker = ty |
-                                                           mypy | both)
- docs-examples       Quality         install               check the fenced
-                                                           examples in the docs
-                                                           tree
- fmt                 Quality                               run the pre-commit
-                                                           hooks over all files
- complexity          Quality                               fail on a block
-                                                           above the
-                                                           cyclomatic-complexi…
-                                                           ceiling
- test-pyproject      Quality         install               run the
-                                                           pyproject.toml
-                                                           structure checks,
-                                                           verbosely
- rhiza-test          Quality         install               run the rhiza
-                                                           repository checks
- semgrep             Quality                               run the semgrep
-                                                           static analysis
-                                                           rules
- todos               Quality                               list every TODO,
-                                                           FIXME and HACK
-                                                           comment
- update              Template                              sync the rhiza
-                                                           template into this
-                                                           repository
- benchmark           Testing extras  install               run the performance
-                                                           benchmarks
- hypothesis-test     Testing extras  install               run the
-                                                           property-based tests
- stress              Testing extras  install               run the stress and
-                                                           load tests
 ```
 
 ## License
