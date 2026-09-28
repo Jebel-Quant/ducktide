@@ -423,7 +423,7 @@ class TestUpsert:
         batches=st.lists(
             st.lists(
                 st.tuples(
-                    st.integers(1, 3),
+                    st.one_of(st.none(), st.integers(1, 3)),  # NULL keys mixed with real ones
                     st.dates(min_value=date(2025, 1, 1), max_value=date(2025, 1, 10)),
                     st.floats(allow_nan=False, allow_infinity=False, width=32),
                 ),
@@ -434,8 +434,8 @@ class TestUpsert:
         )
     )
     def test_upsert_matches_last_write_wins_model(self, batches):
-        """Any sequence of batches, overlapping or out of order, ends as last-write-wins per key."""
-        expected: dict[tuple[int, date], float] = {}
+        """Any sequence of batches, overlapping or out of order, NULL keys included, ends as last-write-wins per key."""
+        expected: dict[tuple[int | None, date], float] = {}
         with TimeSeriesDB() as ts_db:
             for batch in batches:
                 frame = pl.DataFrame(
@@ -447,6 +447,115 @@ class TestUpsert:
                 expected.update({(i, t): c for i, t, c in batch})
 
             stored = ts_db.get_timeseries_frame("p")
-            assert sorted(stored.select("instrument_id", "timestamp", "close").iter_rows()) == sorted(
-                (i, t, c) for (i, t), c in expected.items()
+
+            def order(row):
+                """Sort NULL instrument ids last, since None does not compare with int."""
+                return (row[0] is None, row[0] or 0, row[1])
+
+            assert sorted(stored.select("instrument_id", "timestamp", "close").iter_rows(), key=order) == sorted(
+                ((i, t, c) for (i, t), c in expected.items()), key=order
             )
+
+
+class _RecordingRegister:
+    """Delegate to a real DuckDB connection, recording every frame passed to ``register``."""
+
+    def __init__(self, inner):
+        """Wrap the real connection."""
+        self._inner = inner
+        self.registered: list[pl.DataFrame] = []
+
+    def __getattr__(self, name):
+        """Forward every other attribute to the wrapped connection."""
+        return getattr(self._inner, name)
+
+    def register(self, name, frame):
+        """Record the frame, then register it for real."""
+        self.registered.append(frame)
+        return self._inner.register(name, frame)
+
+
+class TestChunkedFrames:
+    """Frames assembled from many pieces reach DuckDB as one contiguous chunk."""
+
+    @staticmethod
+    def _pieces(day: int, n: int = 50) -> pl.DataFrame:
+        """One day's bars for ``n`` instruments, concatenated from one-row frames (``n`` chunks)."""
+        frame = pl.concat(
+            [
+                pl.DataFrame({"timestamp": [date(2025, 1, day)], "instrument_id": [i], "close": [float(i)]})
+                for i in range(n)
+            ]
+        )
+        assert frame.n_chunks() == n
+        return frame
+
+    @pytest.mark.parametrize("existing", [False, True])
+    def test_chunked_frame_is_registered_as_one_chunk(self, ts_db, monkeypatch, existing):
+        """On create and on upsert, DuckDB is handed a single-chunk frame with every row."""
+        if existing:
+            ts_db.ingest("p", self._pieces(1))
+        recorder = _RecordingRegister(ts_db.con)
+        monkeypatch.setattr(ts_db, "con", recorder)
+
+        ts_db.ingest("p", self._pieces(2))
+        monkeypatch.undo()
+
+        assert [f.n_chunks() for f in recorder.registered] == [1]
+        assert recorder.registered[0].height == 50
+        assert ts_db.get_timeseries_frame("p").height == (100 if existing else 50)
+
+
+class _RecordingExecute:
+    """Delegate to a real DuckDB connection, recording every SQL statement executed."""
+
+    def __init__(self, inner):
+        """Wrap the real connection."""
+        self._inner = inner
+        self.statements: list[str] = []
+
+    def __getattr__(self, name):
+        """Forward every other attribute to the wrapped connection."""
+        return getattr(self._inner, name)
+
+    def execute(self, statement, *args, **kwargs):
+        """Record the statement, then run it for real."""
+        self.statements.append(statement)
+        return self._inner.execute(statement, *args, **kwargs)
+
+
+class TestMergeCondition:
+    """Key columns compare with ``=`` unless the incoming frame has NULLs in them."""
+
+    def _merge(self, ts_db, monkeypatch, frame):
+        """Ingest ``frame`` onto an existing table and return the MERGE statement it ran."""
+        ts_db.ingest("p", pl.DataFrame({"timestamp": [date(2025, 1, 1)], "instrument_id": [1], "close": [1.0]}))
+        recorder = _RecordingExecute(ts_db.con)
+        monkeypatch.setattr(ts_db, "con", recorder)
+        ts_db.ingest("p", frame)
+        monkeypatch.undo()
+        (merge,) = [s for s in recorder.statements if s.startswith("MERGE")]
+        return merge
+
+    def test_frame_without_nulls_uses_equality(self, ts_db, monkeypatch):
+        """A batch with no NULL keys joins with plain ``=``, which lets DuckDB skip row groups."""
+        frame = pl.DataFrame({"timestamp": [date(2025, 1, 2)], "instrument_id": [1], "close": [2.0]})
+        merge = self._merge(ts_db, monkeypatch, frame)
+        assert "IS NOT DISTINCT FROM" not in merge
+        assert 't."instrument_id" = s."instrument_id"' in merge
+
+    def test_null_key_column_is_null_safe(self, ts_db, monkeypatch):
+        """Only the key column holding NULLs compares with IS NOT DISTINCT FROM."""
+        frame = pl.DataFrame({"timestamp": [date(2025, 1, 2)] * 2, "instrument_id": [1, None], "close": [2.0, 3.0]})
+        merge = self._merge(ts_db, monkeypatch, frame)
+        assert 't."instrument_id" IS NOT DISTINCT FROM s."instrument_id"' in merge
+        assert 't."timestamp" = s."timestamp"' in merge
+
+    def test_stored_null_key_is_not_matched_by_a_real_key(self, ts_db):
+        """With ``=``, a stored NULL key still never matches an incoming non-NULL key."""
+        null_row = pl.DataFrame({"timestamp": [date(2025, 1, 1)], "instrument_id": [None], "close": [1.0]})
+        ts_db.ingest("p", null_row.with_columns(pl.col("instrument_id").cast(pl.Int64)))
+        ts_db.ingest("p", pl.DataFrame({"timestamp": [date(2025, 1, 1)], "instrument_id": [7], "close": [2.0]}))
+
+        stored = sorted(ts_db.get_timeseries_frame("p").select("instrument_id", "close").iter_rows(), key=str)
+        assert stored == [(7, 2.0), (None, 1.0)]
