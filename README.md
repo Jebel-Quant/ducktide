@@ -122,13 +122,22 @@ The key is the timestamp plus `instrument_id` when the frame has one; pass
 The timestamp column defaults to `timestamp`; pass `TimeSeriesDB(time_col="ts")`
 to change it.
 
-Ingestion stores rows in arrival order, which spreads each instrument across the
-whole table. `compact` rewrites a table grouped by the same key, so a read for
-one instrument can skip most of it. On 1M daily bars for 500 instruments,
-`get_timeseries_frame` for one instrument over one year drops from about 1.1 ms
-to 0.75 ms, while full-table aggregates get somewhat slower (0.65 ms to
-0.9 ms). New ingests land unsorted again, so compact periodically, e.g. after
-each day's ingest:
+Ingestion stores rows in arrival order. When whole days arrive for every
+instrument at once, that spreads each instrument across the whole table.
+`compact` rewrites a table grouped by the same key, so a read for one
+instrument can skip most of it. It is a trade-off, not a free speed-up:
+
+| | 1M rows, time order | compacted |
+|---|---|---|
+| one instrument, one year | 1.1 ms | 0.75 ms |
+| one day, all instruments | 0.3 ms | 1.4 ms (~15x slower at 10M rows) |
+| mean per instrument, whole table | 0.65 ms | 0.9 ms |
+
+Compact only if reads for single instruments dominate. It does nothing for a
+table loaded one instrument at a time (e.g. through `TimeSeriesModel.ingest`),
+whose rows are already grouped, and DuckDB does not shrink the file afterwards.
+New ingests land unsorted again, so compact periodically, e.g. after each day's
+ingest:
 
 ```python
 ts.compact("prices")  # or ts.compact("fx", key=["base", "quote"])

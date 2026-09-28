@@ -135,10 +135,16 @@ class TimeSeriesIngestMixin(TimeSeriesBase):
         instrument has to scan nearly all of it. Compacting stores the rows
         sorted by the series key, then the timestamp; on 1M daily bars for 500
         instruments a one-instrument, one-year read drops from about 1.1 ms to
-        0.75 ms, while full-table aggregates get somewhat slower (0.65 ms to
-        0.9 ms).
-        New ingests land unsorted again, so compact periodically (e.g. after a
-        day's ingest), not after every write.
+        0.75 ms.
+
+        It is a trade-off: reads across instruments get slower, because each
+        day is now spread over the whole table. A one-day cross-section goes
+        from 0.3 ms to 1.4 ms (about 15x slower at 10M rows), and full-table
+        aggregates from 0.65 ms to 0.9 ms. Compact only if single-series reads
+        dominate. A table ingested one series at a time (e.g. through
+        :meth:`TimeSeriesModel.ingest`) is already grouped, so compacting it
+        gains nothing. New ingests land unsorted again, so compact
+        periodically (e.g. after a day's ingest), not after every write.
 
         The table is emptied and refilled inside one transaction, so its
         schema, constraints, defaults and dependent views are kept, and a
