@@ -104,8 +104,7 @@ def test_merge_upsert_names_every_column() -> None:
     """Matched rows update the non-key columns; unmatched rows insert all columns by name."""
     statement = sql.merge_upsert('"prices"', "src", ["id", "ts"], ["close", "ts", "id"], update=True)
     assert statement == (
-        'MERGE INTO "prices" AS t USING src AS s ON (t."id" IS NOT DISTINCT FROM s."id" '
-        'AND t."ts" IS NOT DISTINCT FROM s."ts") '
+        'MERGE INTO "prices" AS t USING src AS s ON (t."id" = s."id" AND t."ts" = s."ts") '
         'WHEN MATCHED THEN UPDATE SET "close" = s."close" '
         'WHEN NOT MATCHED THEN INSERT ("close", "ts", "id") VALUES (s."close", s."ts", s."id")'
     )
@@ -115,3 +114,9 @@ def test_merge_upsert_without_update_only_inserts() -> None:
     """With update=False, or no non-key columns, matched rows are left alone."""
     assert "WHEN MATCHED" not in sql.merge_upsert("t", "s", ["ts"], ["ts", "v"], update=False)
     assert "WHEN MATCHED" not in sql.merge_upsert("t", "s", ["ts"], ["ts"], update=True)
+
+
+def test_merge_upsert_null_safe_keys() -> None:
+    """Only the key columns named in null_safe compare with IS NOT DISTINCT FROM."""
+    statement = sql.merge_upsert("t", "s", ["id", "ts"], ["id", "ts", "v"], update=True, null_safe=["id"])
+    assert 'ON (t."id" IS NOT DISTINCT FROM s."id" AND t."ts" = s."ts")' in statement
