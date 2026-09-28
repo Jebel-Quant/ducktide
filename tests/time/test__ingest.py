@@ -450,3 +450,52 @@ class TestUpsert:
             assert sorted(stored.select("instrument_id", "timestamp", "close").iter_rows()) == sorted(
                 (i, t, c) for (i, t), c in expected.items()
             )
+
+
+class _RecordingRegister:
+    """Delegate to a real DuckDB connection, recording every frame passed to ``register``."""
+
+    def __init__(self, inner):
+        """Wrap the real connection."""
+        self._inner = inner
+        self.registered: list[pl.DataFrame] = []
+
+    def __getattr__(self, name):
+        """Forward every other attribute to the wrapped connection."""
+        return getattr(self._inner, name)
+
+    def register(self, name, frame):
+        """Record the frame, then register it for real."""
+        self.registered.append(frame)
+        return self._inner.register(name, frame)
+
+
+class TestChunkedFrames:
+    """Frames assembled from many pieces reach DuckDB as one contiguous chunk."""
+
+    @staticmethod
+    def _pieces(day: int, n: int = 50) -> pl.DataFrame:
+        """One day's bars for ``n`` instruments, concatenated from one-row frames (``n`` chunks)."""
+        frame = pl.concat(
+            [
+                pl.DataFrame({"timestamp": [date(2025, 1, day)], "instrument_id": [i], "close": [float(i)]})
+                for i in range(n)
+            ]
+        )
+        assert frame.n_chunks() == n
+        return frame
+
+    @pytest.mark.parametrize("existing", [False, True])
+    def test_chunked_frame_is_registered_as_one_chunk(self, ts_db, monkeypatch, existing):
+        """On create and on upsert, DuckDB is handed a single-chunk frame with every row."""
+        if existing:
+            ts_db.ingest("p", self._pieces(1))
+        recorder = _RecordingRegister(ts_db.con)
+        monkeypatch.setattr(ts_db, "con", recorder)
+
+        ts_db.ingest("p", self._pieces(2))
+        monkeypatch.undo()
+
+        assert [f.n_chunks() for f in recorder.registered] == [1]
+        assert recorder.registered[0].height == 50
+        assert ts_db.get_timeseries_frame("p").height == (100 if existing else 50)

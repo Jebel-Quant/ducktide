@@ -91,6 +91,10 @@ class TimeSeriesIngestMixin(TimeSeriesBase):
         self._validate_table_name(table)
         if on_conflict not in ("update", "ignore"):
             raise ValidationError(f"on_conflict must be 'update' or 'ignore', got {on_conflict!r}")  # noqa: TRY003
+        # A frame assembled with pl.concat keeps one chunk per piece, and DuckDB
+        # pays per chunk: a 500-row frame from 500 one-row frames ingests ~20x
+        # slower. Rechunking costs ~1 ms then and nothing for a contiguous frame.
+        frame = frame.rechunk()
         key_cols = self._key_columns(frame, key)
         # Checking for duplicate keys costs a fifth of removing them, and most
         # frames have none, so only pay for the order-preserving unique() then.
