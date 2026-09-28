@@ -101,6 +101,7 @@ class WriteMixin(TableBase):
             When inserting multiple objects, consider using bulk_insert() directly
             for optimal performance with large datasets.
         """
+        self._require_writable("insert")
         if not objs:
             return
 
@@ -169,6 +170,7 @@ class WriteMixin(TableBase):
             caller only saw the exception — and the obvious retry of the same
             batch would then collide on the primary keys it had just written.
         """
+        self._require_writable("bulk_insert")
         objs = list(objs)
         if not objs:
             return

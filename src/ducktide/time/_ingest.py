@@ -92,6 +92,7 @@ class TimeSeriesIngestMixin(TimeSeriesBase):
             matches a stored NULL instead of inserting a duplicate.
         """
         self._validate_table_name(table)
+        self._require_writable("ingest")
         if on_conflict not in ("update", "ignore"):
             raise ValidationError(f"on_conflict must be 'update' or 'ignore', got {on_conflict!r}")  # noqa: TRY003
         # A frame assembled with pl.concat keeps one chunk per piece, and DuckDB
@@ -180,6 +181,7 @@ class TimeSeriesIngestMixin(TimeSeriesBase):
             size.
         """
         self._validate_table_name(table)
+        self._require_writable("compact")
         if not self.has_table(table):
             return
         quoted_table = self._quote_identifier(table)

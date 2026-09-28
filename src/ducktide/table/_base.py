@@ -13,7 +13,7 @@ from typing import Any, Self
 import duckdb
 from pydantic import BaseModel
 
-from ..exceptions import DataError
+from ..exceptions import DatabaseError, DataError
 from ..model import column_definitions
 from ..utils import sql
 
@@ -31,6 +31,7 @@ class TableBase:
         table_name: The database table name.
         columns: The table's columns — the model's fields, in declaration order.
         pk: The primary-key column name.
+        read_only: Whether writes are refused (see :meth:`_require_writable`).
     """
 
     def __init__(
@@ -52,7 +53,7 @@ class TableBase:
             primary_key: The field holding the primary key.
             sql_types: Per-column SQL definitions overriding the derived ones
                 (see :func:`ducktide.model.column_definitions`).
-            read_only: If True, skip creating the table.
+            read_only: If True, skip creating the table and refuse writes.
         """
         definitions = column_definitions(model, primary_key=primary_key, sql_types=sql_types)
         self.connection = connection
@@ -60,6 +61,7 @@ class TableBase:
         self.table_name = sql.validate_identifier(name or model.__name__.lower(), "table name")
         self.columns = tuple(definitions)
         self.pk = primary_key
+        self.read_only = read_only
 
         if not read_only:
             self.connection.execute(sql.create_table_if_not_exists(self.table_name, definitions))
@@ -124,6 +126,22 @@ class TableBase:
         if not results:
             raise KeyError(f"No row found for {identifier} = {value}")  # noqa: TRY003
         return results[0]
+
+    def _require_writable(self, operation: str) -> None:
+        """Refuse a write up front when the table was opened read-only.
+
+        DuckDB would reject the statement anyway, but with its own
+        ``InvalidInputException`` and only after any preparation work; this
+        raises a ducktide error before anything runs.
+
+        Args:
+            operation: The name of the refused operation, for the message.
+
+        Raises:
+            DatabaseError: If the table is read-only.
+        """
+        if self.read_only:
+            raise DatabaseError(f"{self.table_name!r} is read-only: {operation} needs a writable connection")  # noqa: TRY003
 
     def _values_from_obj(self, obj: Any) -> tuple[Any, ...]:
         """Extract column values from an object as a tuple.
