@@ -274,6 +274,45 @@ TABLE_EXISTS = (
 )
 
 
+def ordered_by(columns: Sequence[str]) -> str:
+    """Return an ``ORDER BY`` fragment sorting ascending on ``columns``, NULLs first.
+
+    NULLs first matches Polars' sort order and ``get_timeseries_frame``.
+
+    Args:
+        columns: The columns to sort by, quoted here via :func:`quote_column`.
+
+    Returns:
+        The fragment, without the ``ORDER BY`` keyword.
+    """
+    return ", ".join(f"{quote_column(c)} ASC NULLS FIRST" for c in columns)
+
+
+def create_temp_table_as(table: str, query: str) -> str:
+    """Return ``CREATE TEMP TABLE <table> AS <query>``.
+
+    Args:
+        table: A code-derived temporary table name.
+        query: A SQL ``SELECT`` producing the table's contents.
+
+    Returns:
+        The create-temp-table-as-select statement.
+    """
+    return f"CREATE TEMP TABLE {table} AS {query}"
+
+
+def delete_all(table: str) -> str:
+    """Return ``DELETE FROM <table>``.
+
+    Args:
+        table: A validated (optionally quoted) table name.
+
+    Returns:
+        The delete statement, removing every row.
+    """
+    return f"DELETE FROM {table}"  # nosec B608  # noqa: S608 - table is validated and quoted by the caller
+
+
 def create_table_as(table: str, query: str) -> str:
     """Return ``CREATE TABLE <table> AS <query>``.
 

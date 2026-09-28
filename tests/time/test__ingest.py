@@ -559,3 +559,145 @@ class TestMergeCondition:
 
         stored = sorted(ts_db.get_timeseries_frame("p").select("instrument_id", "close").iter_rows(), key=str)
         assert stored == [(7, 2.0), (None, 1.0)]
+
+
+def _physical(ts_db: TimeSeriesDB, table: str, *cols: str) -> list[tuple]:
+    """Return ``cols`` in physical storage order (by rowid)."""
+    names = ", ".join(cols)
+    return ts_db.query(f"SELECT {names} FROM {table} ORDER BY rowid").rows()  # noqa: S608 - test-controlled names
+
+
+class _FailingDelete:
+    """Delegate to a real DuckDB connection but fail the ``DELETE`` of a compaction after it has run."""
+
+    def __init__(self, inner):
+        """Wrap the real connection."""
+        self._inner = inner
+
+    def __getattr__(self, name):
+        """Forward every other attribute to the wrapped connection."""
+        return getattr(self._inner, name)
+
+    def execute(self, statement, *args, **kwargs):
+        """Run the statement, then fail if it was the DELETE."""
+        result = self._inner.execute(statement, *args, **kwargs)
+        if statement.startswith("DELETE"):
+            msg = "disk full"
+            raise RuntimeError(msg)
+        return result
+
+
+class TestCompact:
+    """Rewriting a table grouped by series key."""
+
+    @pytest.fixture
+    def interleaved(self, ts_db):
+        """Ingest three days for two instruments, day by day, so storage is in time order."""
+        for day in (1, 2, 3):
+            ts_db.ingest(
+                "p",
+                pl.DataFrame(
+                    {"timestamp": [date(2025, 1, day)] * 2, "instrument_id": [2, 1], "close": [20.0 + day, 10.0 + day]}
+                ),
+            )
+        return ts_db
+
+    def test_groups_rows_by_series_then_time(self, interleaved):
+        """After compacting, each instrument's rows are stored together, in time order."""
+        # Day-by-day ingestion interleaves the instruments (MERGE does not keep
+        # a batch's row order, so only the interleaving is asserted).
+        stored = [i for (i,) in _physical(interleaved, "p", "instrument_id")]
+        assert stored != sorted(stored)
+
+        interleaved.compact("p")
+
+        assert _physical(interleaved, "p", "instrument_id", "timestamp") == [
+            (1, date(2025, 1, 1)),
+            (1, date(2025, 1, 2)),
+            (1, date(2025, 1, 3)),
+            (2, date(2025, 1, 1)),
+            (2, date(2025, 1, 2)),
+            (2, date(2025, 1, 3)),
+        ]
+
+    def test_contents_are_unchanged(self, interleaved):
+        """Compaction only reorders; every row and value survives."""
+        before = _rows(interleaved, "p", "instrument_id", "timestamp", "close")
+        interleaved.compact("p")
+        assert _rows(interleaved, "p", "instrument_id", "timestamp", "close") == before
+
+    def test_custom_key_and_schema_qualified_table(self, ts_db):
+        """A multi-column key groups by those columns, in the table they name."""
+        t = [datetime(2025, 1, 1), datetime(2025, 1, 2)]
+        for when in t:
+            ts_db.ingest(
+                "fx.rates",
+                pl.DataFrame(
+                    {"timestamp": [when] * 2, "base": ["GBP", "EUR"], "quote": ["USD", "USD"], "rate": [1.3, 1.1]}
+                ),
+                key=["base", "quote"],
+            )
+        ts_db.compact("fx.rates", key=["base", "quote"])
+
+        assert _physical(ts_db, "fx.rates", "base", "timestamp") == [
+            ("EUR", t[0]),
+            ("EUR", t[1]),
+            ("GBP", t[0]),
+            ("GBP", t[1]),
+        ]
+
+    def test_without_instrument_id_sorts_by_time(self, ts_db):
+        """A table with no series column is rewritten in time order."""
+        ts_db.con.execute(
+            "CREATE TABLE s AS SELECT * FROM (VALUES (DATE '2025-01-02', 2), (DATE '2025-01-01', 1)) v(timestamp, v)"
+        )
+        ts_db.compact("s")
+        assert [v for (v,) in _physical(ts_db, "s", "v")] == [1, 2]
+
+    def test_keeps_constraints(self, ts_db):
+        """A table's primary key survives compaction and is still enforced."""
+        ts_db.con.execute(
+            "CREATE TABLE pk (timestamp DATE, instrument_id BIGINT, close DOUBLE,"
+            " PRIMARY KEY (instrument_id, timestamp))"
+        )
+        ts_db.con.execute("INSERT INTO pk VALUES ('2025-01-02', 2, 1.0), ('2025-01-01', 1, 2.0)")
+        ts_db.compact("pk")
+
+        assert [i for (i,) in _physical(ts_db, "pk", "instrument_id")] == [1, 2]
+        with pytest.raises(Exception, match=r"(?i)constraint"):
+            ts_db.con.execute("INSERT INTO pk VALUES ('2025-01-01', 1, 9.0)")
+
+    def test_missing_table_is_a_no_op(self, ts_db):
+        """Compacting a table that does not exist does nothing, as reading it returns nothing."""
+        ts_db.compact("nope")
+        assert not ts_db.has_table("nope")
+
+    def test_missing_key_column_raises(self, interleaved):
+        """A key the table does not have is rejected before anything is rewritten."""
+        before = _physical(interleaved, "p", "instrument_id", "timestamp")
+        with pytest.raises(ValidationError, match="table 'p' is missing key column"):
+            interleaved.compact("p", key=["venue"])
+        assert _physical(interleaved, "p", "instrument_id", "timestamp") == before
+
+    def test_failure_rolls_back(self, interleaved, monkeypatch):
+        """A failure after the rows were deleted restores the table and leaves no scratch table."""
+        before = _physical(interleaved, "p", "instrument_id", "timestamp", "close")
+        monkeypatch.setattr(interleaved, "con", _FailingDelete(interleaved.con))
+        with pytest.raises(RuntimeError, match="disk full"):
+            interleaved.compact("p")
+        monkeypatch.undo()
+
+        assert _physical(interleaved, "p", "instrument_id", "timestamp", "close") == before
+        assert not interleaved.has_table("__ducktide_compact")
+        interleaved.con.begin()  # no transaction was left open
+        interleaved.con.rollback()
+
+    def test_read_only_raises(self, tmp_path, sample_frame):
+        """A read-only database cannot be compacted, and is left intact."""
+        path = tmp_path / "ro.duckdb"
+        with TimeSeriesDB(path) as db:
+            db.ingest("prices", sample_frame)
+        with TimeSeriesDB(path, read_only=True) as db:
+            with pytest.raises(Exception, match=r"(?i)read-only|read_only"):
+                db.compact("prices")
+            assert db.get_timeseries_frame("prices").height == sample_frame.height
