@@ -48,7 +48,7 @@ class TimeSeriesModel(ABC):
         Args:
             repo: The time series repository to query.
             start: Optional start date for filtering.
-            end: Optional end date for filtering.
+            end: Optional inclusive end for filtering; a ``date`` includes the whole day.
             timezone: Optional target timezone for the timestamp column.
             every: Optional resampling frequency (e.g., "1d", "1h").
                 If provided, data will be resampled using OHLCV aggregation.
