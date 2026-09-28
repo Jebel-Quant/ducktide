@@ -268,3 +268,129 @@ class TestTimeSeriesModel:
         assert result["low"].to_list() == [99.0, 101.0]
         assert result["close"].to_list() == [101.5, 103.5]
         assert result["volume"].to_list() == [2100, 2500]
+
+
+class OtherModel(DomainModel, TimeSeriesModel):
+    """A second model class with its own table."""
+
+    table_name: ClassVar[str] = "other_table"
+    id: int
+
+    @property
+    def instrument_id(self) -> int:
+        """Return the instrument ID for time series data."""
+        return self.id
+
+
+class _CountingRepo:
+    """Wrap a TimeSeriesDB, recording each ``ingest`` call's table and row count."""
+
+    def __init__(self, inner: TimeSeriesDB):
+        """Wrap the real repository."""
+        self.inner = inner
+        self.calls: list[tuple[str, int]] = []
+
+    def ingest(self, table: str, frame: pl.DataFrame) -> None:
+        """Record the call, then ingest for real."""
+        self.calls.append((table, frame.height))
+        self.inner.ingest(table, frame)
+
+
+def _bars(*days: int, close: float = 1.0) -> pl.DataFrame:
+    """One bar per day of January 2025, in the raw shape the model ingests."""
+    return pl.DataFrame(
+        {
+            "ts_event": [f"2025-01-{day:02d}T09:00:00.000000+0000" for day in days],
+            "close": [close + day for day in days],
+        }
+    )
+
+
+def _stored(repo: TimeSeriesDB, table: str) -> list[tuple]:
+    """Return a table's (instrument_id, timestamp, close) rows, sorted."""
+    frame = repo.get_timeseries_frame(table)
+    return sorted(frame.select("instrument_id", "timestamp", "close").iter_rows())
+
+
+class TestIngestMany:
+    """Batch ingest: same result as sequential ingest, one write per table."""
+
+    def test_matches_sequential_ingest(self):
+        """ingest_many stores exactly what one ingest per pair, in order, would store."""
+        items = [
+            (MockTimeSeriesModel(id=1), _bars(1, 2)),
+            (MockTimeSeriesModel(id=2), _bars(1)),
+            (MockTimeSeriesModel(id=1), _bars(2, 3, close=10.0)),  # re-sends day 2: last pair wins
+        ]
+        sequential, batched = TimeSeriesDB(), TimeSeriesDB()
+        for model, frame in items:
+            model.ingest(sequential, frame)
+        MockTimeSeriesModel.ingest_many(batched, items)
+
+        assert _stored(batched, "test_table") == _stored(sequential, "test_table")
+        assert len(_stored(batched, "test_table")) == 4
+
+    def test_one_write_per_table(self):
+        """Pairs for the same table are combined into a single repository write."""
+        repo = _CountingRepo(TimeSeriesDB())
+        items = [(MockTimeSeriesModel(id=i), _bars(1, 2)) for i in range(50)]
+        items += [(OtherModel(id=i), _bars(1)) for i in range(3)]
+
+        MockTimeSeriesModel.ingest_many(repo, items)
+
+        assert sorted(repo.calls) == [("other_table", 3), ("test_table", 100)]
+        assert len(_stored(repo.inner, "test_table")) == 100
+        assert len(_stored(repo.inner, "other_table")) == 3
+
+    def test_column_order_may_differ(self, repo: TimeSeriesDB):
+        """Frames with the same columns in a different order are aligned by name."""
+        first = _bars(1)
+        MockTimeSeriesModel.ingest_many(
+            repo, [(MockTimeSeriesModel(id=1), first), (MockTimeSeriesModel(id=2), first.select("close", "ts_event"))]
+        )
+        assert [row[2] for row in _stored(repo, "test_table")] == [2.0, 2.0]
+
+    def test_different_columns_raise_before_writing(self, repo: TimeSeriesDB):
+        """Frames for one table with different columns are rejected, and nothing is written."""
+        items = [
+            (OtherModel(id=1), _bars(1)),
+            (MockTimeSeriesModel(id=1), _bars(1)),
+            (MockTimeSeriesModel(id=2), _bars(1).with_columns(volume=pl.lit(5))),
+        ]
+        with pytest.raises(ValidationError, match="frames for table 'test_table' have different columns"):
+            MockTimeSeriesModel.ingest_many(repo, items)
+        assert repo.tables() == []
+
+    def test_invalid_model_raises_before_writing(self, repo: TimeSeriesDB):
+        """A model without an instrument_id fails validation before any table is written."""
+
+        class Unset(DomainModel, TimeSeriesModel):
+            """A model whose instrument_id is not set."""
+
+            table_name: ClassVar[str] = "test_table"
+
+            @property
+            def instrument_id(self) -> None:
+                """Return None to simulate a missing instrument id."""
+                return None
+
+        with pytest.raises(ValidationError, match="instrument_id is not set"):
+            MockTimeSeriesModel.ingest_many(repo, [(MockTimeSeriesModel(id=1), _bars(1)), (Unset(), _bars(1))])
+        assert repo.tables() == []
+
+    def test_no_items_is_a_no_op(self, repo: TimeSeriesDB):
+        """An empty batch writes nothing."""
+        MockTimeSeriesModel.ingest_many(repo, [])
+        assert repo.tables() == []
+
+    def test_empty_frame_contributes_no_rows(self, repo: TimeSeriesDB):
+        """A pair with an empty frame adds nothing, not a row with a NULL timestamp."""
+        MockTimeSeriesModel.ingest_many(
+            repo,
+            [
+                (MockTimeSeriesModel(id=1), _bars(1)),
+                (MockTimeSeriesModel(id=2), _bars(1).clear()),
+                (MockTimeSeriesModel(id=3), _bars(2)),
+            ],
+        )
+        assert [(i, c) for i, _, c in _stored(repo, "test_table")] == [(1, 2.0), (3, 3.0)]
