@@ -54,6 +54,8 @@ class IOMixin(TableBase):
     ) -> None:
         """Export the table to a CSV file using DuckDB's native writer.
 
+        A missing parent folder is created.
+
         Args:
             path: Output CSV path.
             delimiter: Field delimiter (default: ',').
@@ -68,6 +70,7 @@ class IOMixin(TableBase):
 
         if validated_path.exists() and not overwrite:
             raise FileExistsError(validated_path)
+        validated_path.parent.mkdir(parents=True, exist_ok=True)
 
         escaped_path = escape_path_for_sql(validated_path)
 
@@ -103,6 +106,8 @@ class IOMixin(TableBase):
     ) -> None:
         """Export the table to a Parquet file using DuckDB's native writer.
 
+        A missing parent folder is created.
+
         Args:
             path: Output Parquet path.
             compression: Parquet compression codec (snappy, zstd, gzip, uncompressed).
@@ -116,6 +121,7 @@ class IOMixin(TableBase):
 
         if validated_path.exists() and not overwrite:
             raise FileExistsError(validated_path)
+        validated_path.parent.mkdir(parents=True, exist_ok=True)
 
         escaped_path = escape_path_for_sql(validated_path)
 

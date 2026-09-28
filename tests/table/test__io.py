@@ -121,3 +121,17 @@ class TestIOMixin:
         assert str(retrieved.created_at) == "2025-05-15"
 
         connection.close()
+
+
+class TestExportCreatesFolders:
+    """Exports create a missing parent folder instead of failing inside DuckDB."""
+
+    def test_to_csv_and_to_parquet_create_nested_folders(self, table, tmp_path):
+        """to_csv and to_parquet write into folders that do not exist yet."""
+        table.insert(MockModel(id=1, name="a"))
+        csv_path = tmp_path / "missing" / "deeper" / "rows.csv"
+        parquet_path = tmp_path / "also" / "missing" / "rows.parquet"
+        table.to_csv(csv_path)
+        table.to_parquet(parquet_path)
+        assert csv_path.exists()
+        assert parquet_path.exists()
