@@ -26,11 +26,12 @@ in docstrings:
   identifier (optionally ``schema.table`` qualified). Callers that build table
   names route through these (see
   :class:`ducktide.time._base.TimeSeriesBase`).
-* The three builders that interpolate a *raw* column/schema identifier
-  (:func:`select_max_per_instrument`, :func:`select_coalesce_max`,
-  :func:`create_schema_if_not_exists`) call :func:`validate_identifier` on that
-  argument themselves, so the suppression on those lines is guarded by a
-  demonstrable, test-covered validation step.
+* :func:`create_schema_if_not_exists` interpolates a *raw* schema identifier and
+  calls :func:`validate_identifier` on it itself, so the suppression on that
+  line is guarded by a demonstrable, test-covered validation step.
+* :func:`merge_upsert` takes column names straight from a DataFrame and quotes
+  each with :func:`quote_column`, which escapes embedded quotes, so any column
+  name is safe to interpolate.
 
 Suppression comments are kept minimal and load-bearing: ``# nosec B608`` appears
 only on the builders Bandit actually flags, and ``# noqa: S608`` only where Ruff
@@ -50,7 +51,7 @@ with its own exclude list) and they *disagree* about which lines trigger B608:
 """
 
 import re
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 
 from ducktide.exceptions import ValidationError
 
@@ -201,6 +202,51 @@ def insert_columns_from(table: str, columns: str, source: str) -> str:
     return f"INSERT INTO {table} ({columns}) SELECT {columns} FROM {source}"  # nosec B608  # noqa: S608
 
 
+def quote_column(name: str) -> str:
+    """Quote a column name as a DuckDB identifier, escaping embedded quotes.
+
+    Unlike :func:`quote_identifier` this accepts any string, since DataFrame
+    columns may legitimately hold spaces or punctuation; doubling ``"`` makes
+    the result a single identifier whatever the input.
+
+    Args:
+        name: A column name.
+
+    Returns:
+        The double-quoted identifier.
+    """
+    escaped = name.replace('"', '""')
+    return f'"{escaped}"'
+
+
+def merge_upsert(table: str, source: str, key: Sequence[str], columns: Sequence[str], *, update: bool) -> str:
+    """Return a ``MERGE INTO`` that upserts ``source`` into ``table`` on ``key``.
+
+    Every column is named explicitly: DuckDB's bare ``UPDATE``/``INSERT``
+    actions match columns by position, which would silently shuffle values
+    when the source's column order differs from the table's. Key columns
+    compare with ``IS NOT DISTINCT FROM`` so NULL keys match each other.
+
+    Args:
+        table: A validated (optionally quoted) destination table name.
+        source: A registered relation name (code-derived, not user data).
+        key: The key columns; must be a subset of ``columns``.
+        columns: The source's columns, quoted here via :func:`quote_column`.
+        update: Whether a matched row is overwritten (``True``) or left as is.
+
+    Returns:
+        The merge statement.
+    """
+    on = " AND ".join(f"t.{quote_column(c)} IS NOT DISTINCT FROM s.{quote_column(c)}" for c in key)
+    names = ", ".join(quote_column(c) for c in columns)
+    values = ", ".join(f"s.{quote_column(c)}" for c in columns)
+    statement = f"MERGE INTO {table} AS t USING {source} AS s ON ({on})"
+    assignments = ", ".join(f"{quote_column(c)} = s.{quote_column(c)}" for c in columns if c not in key)
+    if update and assignments:
+        statement += f" WHEN MATCHED THEN UPDATE SET {assignments}"  # nosec B608 - columns quoted by quote_column
+    return statement + f" WHEN NOT MATCHED THEN INSERT ({names}) VALUES ({values})"  # noqa: S608 - columns quoted by quote_column
+
+
 # Existence of one table or view, matched on (schema, name) across every
 # attached catalog. Both values are bound parameters, so nothing is interpolated.
 TABLE_EXISTS = (
@@ -324,43 +370,3 @@ def read_parquet_expr(escaped_path: str) -> str:
         The ``read_parquet`` table-valued expression usable in a ``FROM`` clause.
     """
     return f"read_parquet('{escaped_path}')"
-
-
-def select_max_per_instrument(table: str, time_col: str) -> str:
-    """Return the per-instrument max-timestamp query used during ingestion.
-
-    Produces ``SELECT instrument_id, MAX(<time_col>) as max_ts FROM <table>
-    GROUP BY instrument_id``.
-
-    Args:
-        table: A validated (optionally quoted) table name.
-        time_col: The configured timestamp column name.
-
-    Returns:
-        The grouped max-timestamp query.
-
-    Raises:
-        ValidationError: If ``time_col`` is not a valid SQL identifier.
-    """
-    validate_identifier(time_col)
-    return f"SELECT instrument_id, MAX({time_col}) as max_ts FROM {table} GROUP BY instrument_id"  # nosec B608  # noqa: S608  # time_col validated above
-
-
-def select_coalesce_max(table: str, time_col: str, default: str = "1970-01-01") -> str:
-    """Return the global max-timestamp query used during ingestion.
-
-    Produces ``SELECT COALESCE(MAX(<time_col>),'<default>') FROM <table>``.
-
-    Args:
-        table: A validated (optionally quoted) table name.
-        time_col: The configured timestamp column name.
-        default: A fixed epoch literal used when the table is empty.
-
-    Returns:
-        The coalesced max-timestamp query.
-
-    Raises:
-        ValidationError: If ``time_col`` is not a valid SQL identifier.
-    """
-    validate_identifier(time_col)
-    return f"SELECT COALESCE(MAX({time_col}),'{default}') FROM {table}"  # nosec B608  # noqa: S608  # time_col validated above

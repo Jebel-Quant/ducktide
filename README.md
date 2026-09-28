@@ -19,10 +19,11 @@ ducktide is a small persistence layer with two halves:
   (`DB` + `Table`). One model defines a table — its fields are the columns —
   and carries no `save()`/`find()`/`delete()` methods; all reads and writes go
   through the table, so domain objects stay plain values.
-- **Time series**: `TimeSeriesDB`, an append-only store for high-volume
-  numerical data (prices, volumes, sensor readings). Ingestion only appends rows
-  newer than what is already stored, per instrument, so re-ingesting an
-  overlapping frame is safe.
+- **Time series**: `TimeSeriesDB`, a store for high-volume numerical data
+  (prices, volumes, sensor readings). Ingestion upserts on a series key
+  (`instrument_id` plus the timestamp by default), so re-ingesting an
+  overlapping frame is safe, and late rows and corrections land instead of
+  being dropped.
 
 Both run on DuckDB (in-memory or a single file) and hand data back as Polars
 DataFrames. There is no SQLAlchemy and no server.
@@ -96,11 +97,30 @@ ts.ingest(
     ),
 )
 
-ts.get_timeseries_frame("prices", instrument_id=1, start=date(2025, 1, 1))
+# A correction for 9:01 and a late bar for 8:59: both land.
+ts.ingest(
+    "prices",
+    pl.DataFrame(
+        {
+            "timestamp": [datetime(2025, 1, 1, 9, 1), datetime(2025, 1, 1, 8, 59)],
+            "instrument_id": [1, 1],
+            "close": [100.4, 99.9],
+        }
+    ),
+)
+
+ts.get_timeseries_frame("prices", instrument_id=1, start=date(2025, 1, 1))  # 3 rows, close 99.9, 100.0, 100.4
 ```
 
-The table is created on first ingest. The timestamp column defaults to
-`timestamp`; pass `TimeSeriesDB(time_col="ts")` to change it.
+The table is created on first ingest. After that, a row whose key is already
+stored replaces it, and every other row is inserted, whatever its timestamp.
+Within one frame the last row for a key wins. Pass `on_conflict="ignore"` to
+keep stored rows and only add new keys.
+
+The key is the timestamp plus `instrument_id` when the frame has one; pass
+`key=` for other series, e.g. `ts.ingest("fx", frame, key=["base", "quote"])`.
+The timestamp column defaults to `timestamp`; pass `TimeSeriesDB(time_col="ts")`
+to change it.
 
 ## Default database context
 

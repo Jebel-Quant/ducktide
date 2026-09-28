@@ -20,7 +20,7 @@ The separation allows:
 :class:`~ducktide.time._base.TimeSeriesBase`:
 
 - :class:`~ducktide.time._query.TimeSeriesQueryMixin` — time-ordered reads
-- :class:`~ducktide.time._ingest.TimeSeriesIngestMixin` — append-only ingestion
+- :class:`~ducktide.time._ingest.TimeSeriesIngestMixin` — upsert ingestion on a series key
 - :class:`~ducktide.time._io.TimeSeriesIOMixin` — CSV/Parquet import & export
 """
 
