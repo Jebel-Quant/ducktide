@@ -10,9 +10,24 @@ import polars as pl
 import pytest
 from pydantic import BaseModel
 
+from ducktide.exceptions import DatabaseError
 from ducktide.table import Table
 
 from .conftest import MockModel
+
+
+class TestExportCreatesFolders:
+    """Exports create a missing parent folder instead of failing inside DuckDB."""
+
+    def test_to_csv_and_to_parquet_create_nested_folders(self, table, tmp_path):
+        """to_csv and to_parquet write into folders that do not exist yet."""
+        table.insert(MockModel(id=1, name="a"))
+        csv_path = tmp_path / "missing" / "deeper" / "rows.csv"
+        parquet_path = tmp_path / "also" / "missing" / "rows.parquet"
+        table.to_csv(csv_path)
+        table.to_parquet(parquet_path)
+        assert csv_path.exists()
+        assert parquet_path.exists()
 
 
 class MockModelWithDateColumns(BaseModel):
@@ -121,3 +136,15 @@ class TestIOMixin:
         assert str(retrieved.created_at) == "2025-05-15"
 
         connection.close()
+
+
+class TestReadOnlyImports:
+    """A read-only table refuses file imports with a ducktide error."""
+
+    def test_from_csv_and_from_parquet_are_refused(self, connection, tmp_path):
+        """from_csv and from_parquet raise DatabaseError before reading the file."""
+        table = Table(connection, MockModel, name="mock_table", read_only=True)
+        with pytest.raises(DatabaseError, match="read-only: from_csv"):
+            table.from_csv(tmp_path / "rows.csv")
+        with pytest.raises(DatabaseError, match="read-only: from_parquet"):
+            table.from_parquet(tmp_path / "rows.parquet")

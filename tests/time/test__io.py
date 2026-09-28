@@ -6,8 +6,22 @@ from pathlib import Path
 
 import pytest
 
-from ducktide.exceptions import QueryError, ValidationError
+from ducktide.exceptions import DatabaseError, QueryError, ValidationError
 from ducktide.time.timeseries_db import TimeSeriesDB
+
+
+class TestExportCreatesFolders:
+    """Exports create a missing parent folder instead of failing inside DuckDB."""
+
+    def test_export_csv_and_parquet_create_nested_folders(self, ts_db, sample_frame, tmp_path):
+        """export_csv and export_parquet write into folders that do not exist yet."""
+        ts_db.ingest("prices", sample_frame)
+        csv_path = tmp_path / "missing" / "deeper" / "prices.csv"
+        parquet_path = tmp_path / "also" / "missing" / "prices.parquet"
+        ts_db.export_csv("prices", csv_path)
+        ts_db.export_parquet("prices", parquet_path)
+        assert csv_path.exists()
+        assert parquet_path.exists()
 
 
 class TestTimeSeriesIOMixin:
@@ -160,3 +174,20 @@ class TestTimeSeriesIOMixin:
 
         db_ro.close()
         import_db.close()
+
+
+class TestReadOnlyImports:
+    """A read-only store refuses file imports but still exports."""
+
+    def test_imports_are_refused_exports_work(self, sample_frame, tmp_path):
+        """import_csv and import_parquet raise DatabaseError; export_parquet still writes the file."""
+        path = tmp_path / "ro.duckdb"
+        with TimeSeriesDB(path) as writable:
+            writable.ingest("prices", sample_frame)
+        with TimeSeriesDB(path, read_only=True) as ro:
+            with pytest.raises(DatabaseError, match="read-only: import_csv"):
+                ro.import_csv(tmp_path / "rows.csv", "copy")
+            with pytest.raises(DatabaseError, match="read-only: import_parquet"):
+                ro.import_parquet(tmp_path / "rows.parquet", "copy")
+            ro.export_parquet("prices", tmp_path / "out.parquet")
+        assert (tmp_path / "out.parquet").exists()

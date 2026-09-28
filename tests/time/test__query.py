@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime
 from unittest.mock import patch
 
 import polars as pl
@@ -45,10 +45,15 @@ class TestTimeSeriesQueryMixin:
         assert "WHERE" not in q
         assert p == []
 
-        # All filters
+        # All filters; a date end bound covers the whole day
         q, p = ts_db._build_query("ts", 100, date(2025, 1, 1), date(2025, 1, 3))
-        assert "WHERE instrument_id = ? AND timestamp >= ? AND timestamp <= ?" in q
-        assert p == [100, date(2025, 1, 1), date(2025, 1, 3)]
+        assert "WHERE instrument_id = ? AND timestamp >= ? AND timestamp < ?" in q
+        assert p == [100, date(2025, 1, 1), date(2025, 1, 4)]
+
+        # A datetime end bound is used as given
+        q, p = ts_db._build_query("ts", None, None, datetime(2025, 1, 3, 12, 0))
+        assert "WHERE timestamp <= ?" in q
+        assert p == [datetime(2025, 1, 3, 12, 0)]
 
     def test_timeseries_db_query_errors_raise(self, ts_db):
         """TimeSeriesDB.get_timeseries_frame should raise QueryError on SQL failures."""
@@ -230,3 +235,37 @@ class TestTimeSeriesQueryMixin:
         assert result.height == 2
         assert result["timestamp"].dtype == pl.Time
         ts_db.close()
+
+
+class TestDateEndBound:
+    """A ``date`` end bound includes every row on that day."""
+
+    @pytest.fixture
+    def intraday(self, ts_db):
+        """Two intraday rows on 2 January and one at midnight on 3 January."""
+        ts_db.ingest(
+            "m",
+            pl.DataFrame(
+                {
+                    "timestamp": [datetime(2025, 1, 2, 9, 30), datetime(2025, 1, 2, 16, 0), datetime(2025, 1, 3)],
+                    "instrument_id": [1, 1, 1],
+                    "close": [1.0, 2.0, 3.0],
+                }
+            ),
+        )
+        return ts_db
+
+    def test_date_end_includes_intraday_rows(self, intraday):
+        """end=date(2025, 1, 2) returns both rows of that day and nothing from the next."""
+        frame = intraday.get_timeseries_frame("m", end=date(2025, 1, 2))
+        assert frame["close"].to_list() == [1.0, 2.0]
+
+    def test_datetime_end_is_inclusive_to_the_instant(self, intraday):
+        """A datetime end bound keeps its exact cut-off."""
+        frame = intraday.get_timeseries_frame("m", end=datetime(2025, 1, 2, 9, 30))
+        assert frame["close"].to_list() == [1.0]
+
+    def test_date_start_and_end_select_one_day(self, intraday):
+        """Start and end on the same date select exactly that day."""
+        frame = intraday.get_timeseries_frame("m", start=date(2025, 1, 2), end=date(2025, 1, 2))
+        assert frame.height == 2

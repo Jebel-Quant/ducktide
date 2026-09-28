@@ -5,7 +5,7 @@ time-ordered ``SELECT`` statements from optional instrument/time-range filters
 and returns them as Polars DataFrames.
 """
 
-from datetime import date
+from datetime import date, datetime, timedelta
 from typing import Any
 
 import polars as pl
@@ -38,7 +38,9 @@ class TimeSeriesQueryMixin(TimeSeriesBase):
             start: Optional inclusive lower bound for the timestamp column.
                 All rows with timestamp >= start will be included.
             end: Optional inclusive upper bound for the timestamp column.
-                All rows with timestamp <= end will be included.
+                A ``datetime`` includes all rows with timestamp <= end. A
+                ``date`` includes the whole day: all rows with timestamp
+                before the following midnight.
             timezone: Optional target timezone for the timestamp column.
                 If provided, naive timestamps will be converted to this timezone.
 
@@ -149,9 +151,14 @@ class TimeSeriesQueryMixin(TimeSeriesBase):
             conditions.append(f"{self.time_col} >= ?")
             params.append(start)
 
-        if end is not None:
+        if isinstance(end, datetime):
             conditions.append(f"{self.time_col} <= ?")
             params.append(end)
+        elif end is not None:
+            # A date means the whole day; "<= date" would stop at its midnight
+            # and drop every intraday row on the end day.
+            conditions.append(f"{self.time_col} < ?")
+            params.append(end + timedelta(days=1))
 
         where = " AND ".join(conditions)
         # For read queries, keep identifiers unquoted to match test expectations

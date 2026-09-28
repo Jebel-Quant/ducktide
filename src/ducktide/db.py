@@ -13,6 +13,7 @@ from typing import Any, Self
 
 import duckdb
 
+from ducktide.exceptions import DatabaseError
 from ducktide.utils import sql
 
 
@@ -187,6 +188,8 @@ class DB:
             >>> db.execute_query("SHOW TABLES").fetchall()
             []
         """
+        if self.read_only:
+            raise DatabaseError(f"{self.db_path!r} is read-only: drop_all_tables needs a writable connection")  # noqa: TRY003
         tables = self.connection.execute("SHOW TABLES").fetchall()
         for (table_name,) in tables:
             # table_name is a catalog identifier from SHOW TABLES, never user input.
