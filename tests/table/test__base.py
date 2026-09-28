@@ -6,6 +6,7 @@ from datetime import date
 
 import duckdb
 import pytest
+from pydantic import BaseModel
 
 from ducktide.exceptions import DataError
 
@@ -79,3 +80,40 @@ class TestTableBase:
         results = table.execute("SELECT * FROM mock_table WHERE name = ?", ["test"])
         assert len(results) == 1
         assert results[0].name == "test"
+
+
+class Event(BaseModel):
+    """A model whose fields are SQL keywords, to check that column names are quoted."""
+
+    id: int
+    order: int
+    at: date | None = None
+
+
+class TestKeywordColumns:
+    """Fields named after SQL keywords round-trip through every table operation."""
+
+    def test_round_trip(self, tmp_path):
+        """Create, insert, bulk-insert, filter, look up and export a keyword-named table."""
+        from ducktide.table import Table
+
+        con = duckdb.connect(":memory:")
+        try:
+            table = Table(con, Event)
+            table.insert(Event(id=1, order=10, at=date(2025, 1, 2)))
+            table.bulk_insert([Event(id=2, order=20), Event(id=3, order=30, at=date(2025, 1, 3))])
+
+            assert len(table) == 3
+            assert table.get(2) == Event(id=2, order=20)
+            assert table[3].order == 30
+            assert table.get_by("order", 10).id == 1
+            assert [e.id for e in table.select(order_after=15)] == [2, 3]
+            assert [e.id for e in table.select(at=None)] == [2]
+            assert [e.id for e in table.select('"order" >= ? ORDER BY "order" DESC', [20])] == [3, 2]
+
+            table.to_parquet(tmp_path / "events.parquet")
+            table.to_csv(tmp_path / "events.csv")
+            assert (tmp_path / "events.parquet").exists()
+            assert (tmp_path / "events.csv").exists()
+        finally:
+            con.close()

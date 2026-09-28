@@ -330,8 +330,10 @@ def create_table_if_not_exists(table: str, columns: Mapping[str, str]) -> str:
     """Return ``CREATE TABLE IF NOT EXISTS <table> (<column> <definition>, ...)``.
 
     Table and column names are validated here, because they are derived from a
-    model's class and field names rather than written out by hand. The column
-    definitions are SQL type and constraint text supplied by code.
+    model's class and field names rather than written out by hand. Column names
+    are also quoted, so a field named after a SQL keyword (``order``, ``at``)
+    is a valid column. The column definitions are SQL type and constraint text
+    supplied by code.
 
     Args:
         table: The table name.
@@ -346,7 +348,7 @@ def create_table_if_not_exists(table: str, columns: Mapping[str, str]) -> str:
     validate_identifier(table, "table name")
     for column in columns:
         validate_identifier(column, "column name")
-    body = ",\n    ".join(f"{column} {definition}" for column, definition in columns.items())
+    body = ",\n    ".join(f"{quote_column(column)} {definition}" for column, definition in columns.items())
     return f"CREATE TABLE IF NOT EXISTS {table} (\n    {body}\n)"
 
 

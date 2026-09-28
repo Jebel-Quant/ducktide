@@ -81,10 +81,11 @@ class IOMixin(TableBase):
         date_columns = self._get_date_columns()
         select_cols = []
         for col in self.columns:
+            quoted = sql.quote_column(col)
             if col in date_columns:
-                select_cols.append(f"CAST({col} AS VARCHAR) AS {col}")
+                select_cols.append(f"CAST({quoted} AS VARCHAR) AS {quoted}")
             else:
-                select_cols.append(col)
+                select_cols.append(quoted)
 
         # table_name and column names come from the ORM model class definition;
         # escaped_path is sanitized via escape_path_for_sql; the COPY options are
@@ -122,10 +123,11 @@ class IOMixin(TableBase):
         date_columns = self._get_date_columns()
         select_cols = []
         for col in self.columns:
+            quoted = sql.quote_column(col)
             if col in date_columns:
-                select_cols.append(f"CAST({col} AS VARCHAR) AS {col}")
+                select_cols.append(f"CAST({quoted} AS VARCHAR) AS {quoted}")
             else:
-                select_cols.append(col)
+                select_cols.append(quoted)
 
         # table_name and column names come from the ORM model class definition;
         # escaped_path is sanitized via escape_path_for_sql; FORMAT and

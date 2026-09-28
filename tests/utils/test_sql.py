@@ -83,7 +83,15 @@ def test_valid_schema_builder_roundtrip() -> None:
 def test_create_table_if_not_exists_builds_columns_in_order() -> None:
     """Column definitions are emitted in mapping order."""
     statement = sql.create_table_if_not_exists("sensor", {"id": "BIGINT PRIMARY KEY", "name": "VARCHAR NOT NULL"})
-    assert statement == "CREATE TABLE IF NOT EXISTS sensor (\n    id BIGINT PRIMARY KEY,\n    name VARCHAR NOT NULL\n)"
+    assert (
+        statement == 'CREATE TABLE IF NOT EXISTS sensor (\n    "id" BIGINT PRIMARY KEY,\n    "name" VARCHAR NOT NULL\n)'
+    )
+
+
+def test_create_table_if_not_exists_quotes_keyword_columns() -> None:
+    """A column named after a SQL keyword is quoted, so the statement parses."""
+    statement = sql.create_table_if_not_exists("event", {"id": "BIGINT PRIMARY KEY", "order": "BIGINT NOT NULL"})
+    assert '"order" BIGINT NOT NULL' in statement
 
 
 def test_create_table_if_not_exists_rejects_bad_identifiers() -> None:
