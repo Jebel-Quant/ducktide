@@ -78,7 +78,7 @@
 
 \title{\textbf{ducktide}\\[4pt]\large Immutable Pydantic models and append-fast time series on DuckDB and Polars}
 \author{Thomas Schmelzer}
-\date{Version 0.1.0 \quad September 2026}
+\date{Development version after 0.1.0 \quad September 2026}
 
 \begin{document}
 \maketitle
@@ -91,8 +91,8 @@ relational tables, and \emph{time series} (prices, volumes, readings) as columna
 written by idempotent bulk upserts and read back as Polars DataFrames. Both run on DuckDB,
 in memory or in a single file, with no server and no ORM framework. This document
 introduces the library, explains the design decisions behind it, and works through its
-API with examples. Every example was run against ducktide 0.1.0, and the output shown is
-what it printed.
+API with examples. Every example was run against the development version that follows
+ducktide 0.1.0, and the output shown is what it printed.
 \end{abstract}
 
 \tableofcontents
@@ -291,6 +291,26 @@ Three rules complete the derivation:
     \code{UNIQUE}, a \code{DECIMAL} precision, or a type outside the table.
 \end{enumerate}
 
+Column names are quoted in every statement ducktide builds, so a field may be named after
+a SQL keyword:
+
+\begin{python}
+from datetime import datetime
+from ducktide import DB, DomainModel, Table
+
+class Event(DomainModel):
+    id: int
+    order: int
+    at: datetime
+
+db = DB(tables_map={"event": Table.of(Event)})
+db.event.insert(Event(id=1, order=2, at=datetime(2025, 1, 2, 9, 30)))
+db.event.select(order_after=1)
+\end{python}
+\begin{console}
+[Event(id=1, order=2, at=datetime.datetime(2025, 1, 2, 9, 30))]
+\end{console}
+
 \subsection{Values, not active records}
 
 Models carry no \code{save()}, \code{find()} or \code{delete()}. All persistence goes
@@ -368,7 +388,7 @@ Every ducktide exception derives from \code{DucktideError}:
 DucktideError
  +-- ValidationError          bad identifier, unknown filter, missing key column
  +-- DataError                data processing or type problems
- +-- DatabaseError
+ +-- DatabaseError          writes to a store opened read-only
       +-- DatabaseConnectionError
       +-- QueryError          constraint violations, failed time-series reads
 \end{console}
@@ -605,13 +625,13 @@ db.sensor.to_frame()
 export through DuckDB's native writers. \code{from\_parquet(path)} and
 \code{from\_csv(path)} append a file's rows to the table and return how many they
 imported. The file must match the table's columns. Paths are validated before they reach
-SQL.
+SQL, and an export creates any missing parent folders.
 
 \begin{python}
-db.sensor.to_parquet("sensors.parquet")      # the parent folder must exist
+db.sensor.to_parquet("export/2025/sensors.parquet")    # missing folders are created
 
 fresh = DB(tables_map={"sensor": Table.of(Sensor)})
-fresh.sensor.from_parquet("sensors.parquet")
+fresh.sensor.from_parquet("export/2025/sensors.parquet")
 \end{python}
 \begin{console}
 3
@@ -700,7 +720,9 @@ ValidationError: frame is missing key column(s): timestamp
 
 \code{get\_timeseries\_frame} takes the table and the optional filters
 \code{instrument\_id}, \code{start}, \code{end} and \code{timezone}. It returns a frame sorted by time, flagged as sorted for Polars. Both bounds
-are inclusive. A missing table yields an empty frame.
+are inclusive. A \code{datetime} bound is used to the instant; a \code{date} bound covers
+the whole day, so \code{start=date(...)} begins at that midnight and \code{end=date(...)}
+runs up to the next one. A missing table yields an empty frame.
 
 \begin{python}
 ts.get_timeseries_frame("prices", start=date(2025, 1, 3), end=date(2025, 1, 6)).height
@@ -709,6 +731,23 @@ ts.get_timeseries_frame("missing").shape
 \begin{console}
 3
 (0, 0)
+\end{console}
+
+With intraday data the difference between the two kinds of bound shows:
+
+\begin{python}
+bars = TimeSeriesDB()
+bars.ingest("m", pl.DataFrame({
+    "timestamp": [datetime(2025, 1, 2, 9, 30), datetime(2025, 1, 2, 16, 0), datetime(2025, 1, 3)],
+    "instrument_id": [1, 1, 1],
+    "close": [1.0, 2.0, 3.0],
+}))
+bars.get_timeseries_frame("m", end=date(2025, 1, 2))["close"].to_list()
+bars.get_timeseries_frame("m", end=datetime(2025, 1, 2, 9, 30))["close"].to_list()
+\end{python}
+\begin{console}
+[1.0, 2.0]
+[1.0]
 \end{console}
 
 For SQL beyond these filters, \code{query(sql, *args)} returns a Polars frame. Values are
@@ -773,7 +812,9 @@ sensors.get_timeseries_frame("readings")
 
 \subsection{Time zones}
 
-Store timezone-aware timestamps as UTC and convert on the way out with \code{timezone=}:
+Timezone-aware timestamps come back in UTC, whatever the time zone of the machine
+running the code: \code{TimeSeriesDB} pins its DuckDB session to UTC. Pass
+\code{timezone=} to convert on the way out:
 
 \begin{python}
 tz = TimeSeriesDB()
@@ -897,7 +938,7 @@ def bars(px0: float) -> pl.DataFrame:
 
 acme = ref.instrument.get(1)
 acme.ingest(ts, bars(100.0))
-acme.get_timeseries_frame(ts, timezone="UTC").select("timestamp", "instrument_id", "close")
+acme.get_timeseries_frame(ts).select("timestamp", "instrument_id", "close")
 \end{python}
 \begin{console}
 | timestamp               | instrument_id | close  |
@@ -934,7 +975,7 @@ aggregation (first open, max high, min low, last close, summed volume). The fram
 have those five columns and a \code{timestamp} column.
 
 \begin{python}
-acme.get_timeseries_frame(ts, timezone="UTC", every="1h")
+acme.get_timeseries_frame(ts, every="1h")
 \end{python}
 \begin{console}
 | timestamp               | open  | high  | low   | close  | volume |
@@ -1002,8 +1043,16 @@ reader = TimeSeriesDB("prices.duckdb", read_only=True)
 reader.get_timeseries_frame("prices", instrument_id=42)
 \end{python}
 
-A read-only store refuses writes. The error currently comes straight from DuckDB
-(\code{duckdb.InvalidInputException}) rather than as a ducktide exception.
+A read-only store refuses every write (insert, bulk insert, ingest, compact, imports,
+dropping tables) with a \code{DatabaseError} before anything reaches DuckDB. Exports still
+work, since they write a file rather than the database:
+
+\begin{python}
+reader.ingest("prices", todays_bars)
+\end{python}
+\begin{console}
+DatabaseError: The time-series database is read-only: ingest needs a writable connection
+\end{console}
 
 \subsection{A default database for notebooks and tests}
 
@@ -1049,22 +1098,13 @@ def test_correction_replaces_bar(ts):
 \end{python}
 
 % ---------------------------------------------------------------------------
-\section{Pitfalls and current limitations}
+\section{Current limitations}
 
 \begin{itemize}
-\item \textbf{A \code{date} upper bound means midnight.} \code{end=date(2025, 1, 2)}
-  compares against \code{2025-01-02 00:00:00}, so intraday rows later that day are
-  excluded. Pass a \code{datetime} for intraday data:
-\begin{python}
-m.get_timeseries_frame("m", end=date(2025, 1, 2)).height                     # 0
-m.get_timeseries_frame("m", end=datetime(2025, 1, 2, 23, 59, 59)).height     # 2
-\end{python}
-\item \textbf{Timezone-aware columns come back in the session's local zone.} DuckDB returns
-  \code{TIMESTAMPTZ} values in the machine's time zone unless you pass \code{timezone=}.
-  Pass \code{timezone="UTC"} for results that do not depend on where the code runs.
-\item \textbf{Column names that are SQL keywords.} A model field named after a reserved
-  word (for example \code{at}) currently fails at table creation with a DuckDB parser
-  error. Choose a different field name.
+\item \textbf{Table names that are SQL keywords.} Column names are quoted, table names are
+  not yet. A model class named after a keyword (\code{class Order} gives the table
+  \code{order}) fails at table creation with a DuckDB parser error. Name the table
+  explicitly: \code{Table.of(Order, name="orders")}.
 \item \textbf{No update or delete on \code{Table}.} Use \code{db.execute\_query} with
   placeholders, as shown above.
 \item \textbf{One writer per file.} This is DuckDB's rule, not ducktide's. Plan processes
@@ -1074,6 +1114,8 @@ m.get_timeseries_frame("m", end=datetime(2025, 1, 2, 23, 59, 59)).height     # 2
 \item \textbf{Resampling assumes OHLCV.} \code{every=} aggregates
   \code{open/high/low/close/volume} on \code{timestamp}. For other shapes, resample the
   returned frame with Polars' \code{group\_by\_dynamic} directly.
+\item \textbf{Raw SQL is raw.} \code{execute\_query} and \code{query} pass DuckDB's own
+  exceptions through, including on a read-only store.
 \end{itemize}
 
 % ---------------------------------------------------------------------------
