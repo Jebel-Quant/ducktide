@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from ducktide.exceptions import QueryError, ValidationError
+from ducktide.exceptions import DatabaseError, QueryError, ValidationError
 from ducktide.time.timeseries_db import TimeSeriesDB
 
 
@@ -174,3 +174,20 @@ class TestTimeSeriesIOMixin:
 
         db_ro.close()
         import_db.close()
+
+
+class TestReadOnlyImports:
+    """A read-only store refuses file imports but still exports."""
+
+    def test_imports_are_refused_exports_work(self, sample_frame, tmp_path):
+        """import_csv and import_parquet raise DatabaseError; export_parquet still writes the file."""
+        path = tmp_path / "ro.duckdb"
+        with TimeSeriesDB(path) as writable:
+            writable.ingest("prices", sample_frame)
+        with TimeSeriesDB(path, read_only=True) as ro:
+            with pytest.raises(DatabaseError, match="read-only: import_csv"):
+                ro.import_csv(tmp_path / "rows.csv", "copy")
+            with pytest.raises(DatabaseError, match="read-only: import_parquet"):
+                ro.import_parquet(tmp_path / "rows.parquet", "copy")
+            ro.export_parquet("prices", tmp_path / "out.parquet")
+        assert (tmp_path / "out.parquet").exists()

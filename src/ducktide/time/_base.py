@@ -13,6 +13,7 @@ from typing import Any, Self
 import duckdb
 import polars as pl
 
+from ..exceptions import DatabaseError
 from ..utils import sql
 
 
@@ -65,6 +66,22 @@ class TimeSeriesBase:
         # Single audited validator lives in the SQL-composition module so the
         # "caller validated it" contract is enforced next to the interpolation.
         return sql.validate_identifier(table, kind="table name")
+
+    def _require_writable(self, operation: str) -> None:
+        """Refuse a write up front when the database was opened read-only.
+
+        DuckDB would reject the statement anyway, but with its own
+        ``InvalidInputException`` and only after any preparation work; this
+        raises a ducktide error before anything runs.
+
+        Args:
+            operation: The name of the refused operation, for the message.
+
+        Raises:
+            DatabaseError: If the database is read-only.
+        """
+        if self.read_only:
+            raise DatabaseError(f"The time-series database is read-only: {operation} needs a writable connection")  # noqa: TRY003
 
     def _quote_identifier(self, ident: str) -> str:
         """Quote a table or schema identifier for safe SQL use.

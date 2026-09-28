@@ -138,3 +138,19 @@ class TestDB:
         """Test inserting an object with an unregistered type."""
         with DB(tables_map={}) as db, pytest.raises(TypeError, match="Invalid object type"):
             db.insert("unregistered string object")
+
+
+class TestReadOnlyDB:
+    """A read-only DB refuses to drop tables."""
+
+    def test_drop_all_tables_is_refused(self, tmp_path):
+        """drop_all_tables raises DatabaseError on a read-only database."""
+        from ducktide.exceptions import DatabaseError
+
+        path = tmp_path / "ro.duckdb"
+        DB(tables_map={"items": ITEMS}, db_path=path).close()
+        with (
+            DB(tables_map={"items": ITEMS}, db_path=path, read_only=True) as db,
+            pytest.raises(DatabaseError, match="read-only: drop_all_tables"),
+        ):
+            db.drop_all_tables()
