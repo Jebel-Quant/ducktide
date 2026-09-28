@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
-from datetime import date
+import os
+import subprocess
+import sys
+import textwrap
+from datetime import date, datetime
 
 import polars as pl
 import pytest
@@ -134,3 +138,42 @@ class TestTimeSeriesBase:
 
         db_ro1.close()
         db_ro2.close()
+
+
+class TestSessionTimeZone:
+    """Timezone-aware timestamps come back in UTC, whatever the machine's zone."""
+
+    def test_session_time_zone_is_utc(self, ts_db):
+        """The connection's TimeZone setting is pinned to UTC."""
+        assert ts_db.con.execute("SELECT current_setting('TimeZone')").fetchone() == ("UTC",)
+
+    def test_aware_timestamps_read_back_in_utc_under_a_local_zone(self, tmp_path):
+        """With TZ set to New York, a stored UTC instant is still returned as UTC.
+
+        DuckDB reads its default zone from the environment when the process
+        starts, so the check runs in a subprocess with ``TZ`` set.
+        """
+        script = textwrap.dedent(
+            """
+            from datetime import datetime
+            import polars as pl
+            from ducktide import TimeSeriesDB
+
+            ts = TimeSeriesDB()
+            frame = pl.DataFrame({"timestamp": [datetime(2025, 1, 2, 14, 30)], "px": [1.0]})
+            ts.ingest("ticks", frame.with_columns(pl.col("timestamp").dt.replace_time_zone("UTC")))
+            read = ts.get_timeseries_frame("ticks")["timestamp"]
+            print(read.dtype.time_zone, read[0].isoformat())
+            """
+        )
+        env = {**os.environ, "TZ": "America/New_York"}
+        result = subprocess.run([sys.executable, "-c", script], env=env, capture_output=True, text=True, check=True)
+        assert result.stdout.split() == ["UTC", "2025-01-02T14:30:00+00:00"]
+
+    def test_timezone_argument_still_converts(self, ts_db):
+        """An explicit ``timezone=`` converts from UTC to the requested zone."""
+        frame = pl.DataFrame({"timestamp": [datetime(2025, 1, 2, 14, 30)], "px": [1.0]})
+        ts_db.ingest("ticks", frame.with_columns(pl.col("timestamp").dt.replace_time_zone("UTC")))
+        read = ts_db.get_timeseries_frame("ticks", timezone="America/New_York")["timestamp"]
+        assert read.dtype.time_zone == "America/New_York"
+        assert read[0].hour == 9

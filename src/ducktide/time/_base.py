@@ -37,11 +37,17 @@ class TimeSeriesBase:
             path: Optional filesystem path to a DuckDB database file. If None,
                 an in-memory database is created (":memory:").
             time_col: Name of the column containing time information (default: "timestamp").
+                Timezone-aware values in it are returned in UTC unless a read
+                asks for another zone.
             read_only: If True, open the database in read-only mode. This prevents
                 all write operations and allows multiple processes to safely read from
                 the same file without locks.
         """
         self.con = duckdb.connect(path or ":memory:", read_only=read_only)
+        # DuckDB hands TIMESTAMPTZ values back in the session's time zone, which
+        # defaults to the machine's. Pin it to UTC so reads do not depend on
+        # where the code runs; ``timezone=`` converts on the way out.
+        self.con.execute("SET TimeZone = 'UTC'")
         # ``time_col`` is interpolated directly into SQL (identifiers cannot be
         # bound as parameters), so validate it at the object boundary — this is
         # the sole user-supplied identifier reaching the SQL builders.
