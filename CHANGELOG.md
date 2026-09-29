@@ -5,6 +5,11 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com),
 and entries are generated from [Conventional Commits](https://www.conventionalcommits.org).
 
+## [0.1.2] - 2026-09-29
+
+### Bug Fixes
+- Honour TimeSeriesDB.time_col in TimeSeriesModel resampling (#42)
+
 ## [0.1.1] - 2026-09-29
 
 ### Bug Fixes
