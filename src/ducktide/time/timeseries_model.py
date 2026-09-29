@@ -76,8 +76,9 @@ class TimeSeriesModel(ABC):
         )
 
         if every is not None:
+            time_col = repo.time_col
             frame = (
-                frame.group_by_dynamic("timestamp", every=every)
+                frame.group_by_dynamic(time_col, every=every)
                 .agg(
                     pl.col("open").first(),
                     pl.col("high").max(),
@@ -85,7 +86,7 @@ class TimeSeriesModel(ABC):
                     pl.col("close").last(),
                     pl.col("volume").sum(),
                 )
-                .sort("timestamp")
+                .sort(time_col)
             )
 
         return frame
