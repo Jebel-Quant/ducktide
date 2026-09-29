@@ -269,6 +269,30 @@ class TestTimeSeriesModel:
         assert result["close"].to_list() == [101.5, 103.5]
         assert result["volume"].to_list() == [2100, 2500]
 
+    def test_resampling_honours_custom_time_col(self):
+        """Resampling groups on the repository's ``time_col``, not a hardcoded 'timestamp'."""
+        repo = TimeSeriesDB(time_col="ts")
+        repo.ingest(
+            "test_table",
+            pl.DataFrame(
+                {
+                    "ts": [datetime(2025, 1, 1, 9, 0, tzinfo=UTC), datetime(2025, 1, 1, 9, 30, tzinfo=UTC)],
+                    "instrument_id": [42, 42],
+                    "open": [100.0, 101.0],
+                    "high": [101.0, 102.0],
+                    "low": [99.0, 100.0],
+                    "close": [100.5, 101.5],
+                    "volume": [1000, 1100],
+                }
+            ),
+        )
+
+        result = MockTimeSeriesModel(id=42).get_timeseries_frame(repo, every="1h")
+
+        assert result.columns[0] == "ts"
+        assert result.height == 1
+        assert result["volume"].to_list() == [2100]
+
 
 class OtherModel(DomainModel, TimeSeriesModel):
     """A second model class with its own table."""
@@ -288,6 +312,7 @@ class _CountingRepo:
     def __init__(self, inner: TimeSeriesDB):
         """Wrap the real repository."""
         self.inner = inner
+        self.time_col = inner.time_col
         self.calls: list[tuple[str, int]] = []
 
     def ingest(self, table: str, frame: pl.DataFrame) -> None:

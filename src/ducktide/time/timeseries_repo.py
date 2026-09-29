@@ -18,7 +18,12 @@ class TimeSeriesRepository(Protocol):
     concrete time series repository class,
     allowing for different implementations
     while maintaining a consistent interface for clients.
+
+    Attributes:
+        time_col: Name of the timestamp column in the frames the repository returns.
     """
+
+    time_col: str
 
     def get_timeseries_frame(
         self,
