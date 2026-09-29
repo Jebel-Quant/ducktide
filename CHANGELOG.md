@@ -5,6 +5,21 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com),
 and entries are generated from [Conventional Commits](https://www.conventionalcommits.org).
 
+## [0.1.1] - 2026-09-29
+
+### Bug Fixes
+- Quote column names in entity-table SQL (#29) (#34)
+- Raise DatabaseError on writes to a read-only store (#32) (#35)
+- Create a missing parent folder on export (#33) (#36)
+- Include the whole day for a date end bound (#31) (#38)
+- Return timezone-aware timestamps in UTC (#30) (#37)
+
+### Documentation
+- Explain the two-database design, drop the README's Development section (#27)
+- Add a LaTeX introduction to ducktide (#28)
+- Update the introduction paper for the fixes in #34-#38 (#39)
+- Link the introduction PDF from the book nav (#40)
+
 ## [0.1.0] - 2026-09-28
 
 ### New Features
