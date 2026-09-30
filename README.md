@@ -74,32 +74,41 @@ Requires Python 3.11+.
 
 Define a domain model; the table is derived from it:
 
-```python
-import tempfile
-from pathlib import Path
+```pycon
+>>> import tempfile
+>>> from pathlib import Path
 
-from ducktide import DB, DomainModel, Table
+>>> from ducktide import DB, DomainModel, Table
 
+>>> class Sensor(DomainModel):
+...     id: int
+...     name: str
+...     site: str
 
-class Sensor(DomainModel):
-    id: int
-    name: str
-    site: str
+>>> db = DB(tables_map={"sensor": Table.of(Sensor)})  # or db_path="sensors.duckdb"
 
+>>> db.sensor.bulk_insert(
+...     [
+...         Sensor(id=1, name="north", site="berlin"),
+...         Sensor(id=2, name="south", site="zurich"),
+...     ]
+... )
 
-db = DB(tables_map={"sensor": Table.of(Sensor)})  # or db_path="sensors.duckdb"
-
-db.sensor.bulk_insert(
-    [
-        Sensor(id=1, name="north", site="berlin"),
-        Sensor(id=2, name="south", site="zurich"),
-    ]
-)
-
-db.sensor.select(site="berlin")  # [Sensor(id=1, name='north', site='berlin')]
-db.sensor.get(2)  # Sensor(id=2, name='south', site='zurich')
-db.sensor.to_frame()  # polars.DataFrame
-db.sensor.to_parquet(Path(tempfile.mkdtemp()) / "sensors.parquet")
+>>> db.sensor.select(site="berlin")
+[Sensor(id=1, name='north', site='berlin')]
+>>> db.sensor.get(2)
+Sensor(id=2, name='south', site='zurich')
+>>> db.sensor.to_frame()
+shape: (2, 3)
+┌─────┬───────┬────────┐
+│ id  ┆ name  ┆ site   │
+│ --- ┆ ---   ┆ ---    │
+│ i64 ┆ str   ┆ str    │
+╞═════╪═══════╪════════╡
+│ 1   ┆ north ┆ berlin │
+│ 2   ┆ south ┆ zurich │
+└─────┴───────┴────────┘
+>>> db.sensor.to_parquet(Path(tempfile.mkdtemp()) / "sensors.parquet")
 ```
 
 The columns, their DuckDB types and `NOT NULL` come from the fields (`X | None`
@@ -111,39 +120,49 @@ does not cover.
 
 ## Time series
 
-```python
-from datetime import date, datetime
+```pycon
+>>> from datetime import date, datetime
 
-import polars as pl
+>>> import polars as pl
 
-from ducktide import TimeSeriesDB
+>>> from ducktide import TimeSeriesDB
 
-ts = TimeSeriesDB()  # or TimeSeriesDB("prices.duckdb")
+>>> ts = TimeSeriesDB()  # or TimeSeriesDB("prices.duckdb")
 
-ts.ingest(
-    "prices",
-    pl.DataFrame(
-        {
-            "timestamp": [datetime(2025, 1, 1, 9, 0), datetime(2025, 1, 1, 9, 1)],
-            "instrument_id": [1, 1],
-            "close": [100.0, 100.5],
-        }
-    ),
-)
+>>> ts.ingest(
+...     "prices",
+...     pl.DataFrame(
+...         {
+...             "timestamp": [datetime(2025, 1, 1, 9, 0), datetime(2025, 1, 1, 9, 1)],
+...             "instrument_id": [1, 1],
+...             "close": [100.0, 100.5],
+...         }
+...     ),
+... )
 
-# A correction for 9:01 and a late bar for 8:59: both land.
-ts.ingest(
-    "prices",
-    pl.DataFrame(
-        {
-            "timestamp": [datetime(2025, 1, 1, 9, 1), datetime(2025, 1, 1, 8, 59)],
-            "instrument_id": [1, 1],
-            "close": [100.4, 99.9],
-        }
-    ),
-)
+>>> # A correction for 9:01 and a late bar for 8:59: both land.
+>>> ts.ingest(
+...     "prices",
+...     pl.DataFrame(
+...         {
+...             "timestamp": [datetime(2025, 1, 1, 9, 1), datetime(2025, 1, 1, 8, 59)],
+...             "instrument_id": [1, 1],
+...             "close": [100.4, 99.9],
+...         }
+...     ),
+... )
 
-ts.get_timeseries_frame("prices", instrument_id=1, start=date(2025, 1, 1))  # 3 rows, close 99.9, 100.0, 100.4
+>>> ts.get_timeseries_frame("prices", instrument_id=1, start=date(2025, 1, 1))
+shape: (3, 3)
+┌─────────────────────┬───────────────┬───────┐
+│ timestamp           ┆ instrument_id ┆ close │
+│ ---                 ┆ ---           ┆ ---   │
+│ datetime[μs]        ┆ i64           ┆ f64   │
+╞═════════════════════╪═══════════════╪═══════╡
+│ 2025-01-01 08:59:00 ┆ 1             ┆ 99.9  │
+│ 2025-01-01 09:00:00 ┆ 1             ┆ 100.0 │
+│ 2025-01-01 09:01:00 ┆ 1             ┆ 100.4 │
+└─────────────────────┴───────────────┴───────┘
 ```
 
 The table is created on first ingest. After that, a row whose key is already
@@ -173,8 +192,8 @@ whose rows are already grouped, and DuckDB does not shrink the file afterwards.
 New ingests land unsorted again, so compact periodically, e.g. after each day's
 ingest:
 
-```python
-ts.compact("prices")  # or ts.compact("fx", key=["base", "quote"])
+```pycon
+>>> ts.compact("prices")  # or ts.compact("fx", key=["base", "quote"])
 ```
 
 ## Why two databases?
@@ -211,39 +230,45 @@ Keeping them in separate files also pays off:
 `TimeSeriesModel` connects the two. A model loaded from `DB` knows its
 time-series table and its `instrument_id`, and fetches its own frame:
 
-```python
-from datetime import datetime
-from typing import ClassVar
+```pycon
+>>> from datetime import datetime
+>>> from typing import ClassVar
 
-import polars as pl
+>>> import polars as pl
 
-from ducktide import DB, DomainModel, Table, TimeSeriesDB
-from ducktide.time import TimeSeriesModel
+>>> from ducktide import DB, DomainModel, Table, TimeSeriesDB
+>>> from ducktide.time import TimeSeriesModel
 
+>>> class Instrument(DomainModel, TimeSeriesModel):
+...     table_name: ClassVar[str] = "prices"
+...
+...     id: int
+...     ticker: str
+...     exchange: str
+...
+...     @property
+...     def instrument_id(self) -> int:
+...         return self.id
 
-class Instrument(DomainModel, TimeSeriesModel):
-    table_name: ClassVar[str] = "prices"
+>>> ref = DB(tables_map={"instrument": Table.of(Instrument)})  # e.g. db_path="reference.duckdb"
+>>> ts = TimeSeriesDB()  # e.g. TimeSeriesDB("prices.duckdb")
 
-    id: int
-    ticker: str
-    exchange: str
+>>> ref.instrument.insert(Instrument(id=1, ticker="ACME", exchange="XNYS"))
+>>> ts.ingest(
+...     "prices",
+...     pl.DataFrame({"timestamp": [datetime(2025, 1, 1, 9, 0)], "instrument_id": [1], "close": [100.0]}),
+... )
 
-    @property
-    def instrument_id(self) -> int:
-        return self.id
-
-
-ref = DB(tables_map={"instrument": Table.of(Instrument)})  # e.g. db_path="reference.duckdb"
-ts = TimeSeriesDB()  # e.g. TimeSeriesDB("prices.duckdb")
-
-ref.instrument.insert(Instrument(id=1, ticker="ACME", exchange="XNYS"))
-ts.ingest(
-    "prices",
-    pl.DataFrame({"timestamp": [datetime(2025, 1, 1, 9, 0)], "instrument_id": [1], "close": [100.0]}),
-)
-
-acme = ref.instrument.get(1)  # an Instrument, from the reference database
-acme.get_timeseries_frame(ts)  # its prices, from the time-series database
+>>> acme = ref.instrument.get(1)  # an Instrument, from the reference database
+>>> acme.get_timeseries_frame(ts)  # its prices, from the time-series database
+shape: (1, 3)
+┌─────────────────────┬───────────────┬───────┐
+│ timestamp           ┆ instrument_id ┆ close │
+│ ---                 ┆ ---           ┆ ---   │
+│ datetime[μs]        ┆ i64           ┆ f64   │
+╞═════════════════════╪═══════════════╪═══════╡
+│ 2025-01-01 09:00:00 ┆ 1             ┆ 100.0 │
+└─────────────────────┴───────────────┴───────┘
 ```
 
 The trade-off: a SQL join across the two, such as all prices for instruments
@@ -255,11 +280,11 @@ the instruments in the reference database first, then read their series.
 For notebooks and tests you can scope a default database instead of passing it
 around:
 
-```python
-from ducktide.context import use_db
+```pycon
+>>> from ducktide.context import use_db
 
-with use_db(db):
-    ...  # code that calls ducktide.context.get_default_db()
+>>> with use_db(db):
+...     pass  # code that calls ducktide.context.get_default_db()
 ```
 
 ## License
