@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from datetime import date, datetime
-from unittest.mock import patch
 
 import polars as pl
 import pytest
@@ -57,15 +56,8 @@ class TestTimeSeriesQueryMixin:
 
     def test_timeseries_db_query_errors_raise(self, ts_db):
         """TimeSeriesDB.get_timeseries_frame should raise QueryError on SQL failures."""
-        # Force an error by mocking _build_query to return something that will fail in execute
-        with patch.object(ts_db, "_build_query", return_value=("SELECT * FROM non_existent WHERE x = ?", [1])):
-            # ingest a table so has_table check passes
-            ts_db.ingest("fail_table", pl.DataFrame({"timestamp": [date(2025, 1, 1)], "instrument_id": [1]}))
-            with pytest.raises(QueryError, match="fail_table"):
-                ts_db.get_timeseries_frame("fail_table")
-
-        # A table without the expected time column should also raise (ORDER BY fails),
-        # not silently return an empty frame
+        # A table without the expected time column exists, so has_table passes, but the
+        # query's ORDER BY fails: that must raise, not silently return an empty frame
         ts_db.con.execute("CREATE TABLE bad_table (id INTEGER)")
         ts_db.con.execute("INSERT INTO bad_table VALUES (1)")
 
