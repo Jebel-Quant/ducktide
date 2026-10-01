@@ -36,8 +36,9 @@ Prefer bare `make <target>`; never call `.venv/bin/…` directly. `make help` li
 - `utils/` — `sql.py` (the only place SQL strings with identifiers are composed;
   identifiers go through `validate_identifier`/`quote_identifier`) and `path_validation.py`.
 
-One Pydantic model defines a table and is what reads return; models carry no persistence methods —
-all reads and writes go through a `Table`.
+One Pydantic model defines a table and is what reads return. Models hold no connection: entity reads
+and writes go through a `Table`, and `TimeSeriesModel`'s `ingest`, `ingest_many` and
+`get_timeseries_frame` take the store as an argument, typed as the `TimeSeriesRepository` Protocol.
 
 ## Rhiza template split
 
