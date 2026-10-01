@@ -223,11 +223,7 @@ class TimeSeriesIngestMixin(TimeSeriesBase):
         else:
             series = [col for col in key if col != self.time_col]
         key_cols = [*series, self.time_col]
-        if len(set(key_cols)) != len(key_cols):
-            raise ValidationError(f"key repeats a column: {list(key or [])}")  # noqa: TRY003
-        missing = [col for col in key_cols if col not in columns]
-        if missing:
-            raise ValidationError(f"{source} is missing key column(s): {', '.join(missing)}")  # noqa: TRY003
+        _check_key_columns(key_cols, columns, key=key, source=source)
         return key_cols
 
     def _ensure_schema(self, table: str) -> None:
@@ -261,3 +257,23 @@ class TimeSeriesIngestMixin(TimeSeriesBase):
         quoted_table = self._quote_identifier(table)
         self.con.execute(sql.create_table_as(quoted_table, sql.select_all("temp_ingest")))
         self.con.unregister("temp_ingest")
+
+
+def _check_key_columns(key_cols: list[str], columns: Sequence[str], *, key: Sequence[str] | None, source: str) -> None:
+    """Check that a resolved series key has no repeats and exists in ``columns``.
+
+    Args:
+        key_cols: The resolved key columns, timestamp last.
+        columns: The columns available (a frame's or a table's).
+        key: The caller's series columns, for the error message.
+        source: What ``columns`` belong to, for the error message.
+
+    Raises:
+        ValidationError: If ``key_cols`` repeats a column, or a key column is
+            not in ``columns``.
+    """
+    if len(set(key_cols)) != len(key_cols):
+        raise ValidationError(f"key repeats a column: {list(key or [])}")  # noqa: TRY003
+    missing = [col for col in key_cols if col not in columns]
+    if missing:
+        raise ValidationError(f"{source} is missing key column(s): {', '.join(missing)}")  # noqa: TRY003

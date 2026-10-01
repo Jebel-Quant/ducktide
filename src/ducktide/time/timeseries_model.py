@@ -155,39 +155,12 @@ class TimeSeriesModel(ABC):
             leaves the tables before it written.
         """
         # Validate every model first, so a bad pair fails before anything is written.
-        pairs_by_table: dict[str, list[tuple[int, pl.DataFrame]]] = {}
-        for model, frame in items:
-            table, instrument_id = model._ingest_target()
-            pairs_by_table.setdefault(table, []).append((instrument_id, frame))
+        pairs_by_table = _pairs_by_table(items)
+        for table, pairs in pairs_by_table.items():
+            _check_same_columns(table, pairs)
 
         for table, pairs in pairs_by_table.items():
-            columns = pairs[0][1].columns
-            for _, frame in pairs[1:]:
-                if set(frame.columns) != set(columns):
-                    raise ValidationError(  # noqa: TRY003
-                        f"frames for table '{table}' have different columns: "
-                        f"{sorted(columns)} vs {sorted(frame.columns)}"
-                    )
-
-        # Prepare each table's frames as one: parse ts_event once for all of them
-        # and build instrument_id in one step. Per-pair Polars calls cost ~0.1 ms
-        # each, which for 500 instruments would dwarf the write itself.
-        for table, pairs in pairs_by_table.items():
-            columns = pairs[0][1].columns
-            aligned = [frame if frame.columns == columns else frame.select(columns) for _, frame in pairs]
-            combined = pl.concat(aligned, how="vertical_relaxed", rechunk=True)
-            counts = pl.DataFrame(
-                {
-                    "instrument_id": [instrument_id for instrument_id, _ in pairs],
-                    "n": [frame.height for _, frame in pairs],
-                },
-                schema={"instrument_id": pl.Int64, "n": pl.Int64},
-            )
-            # empty_as_null=False: a pair with an empty frame contributes no row, not a NULL one.
-            instrument_ids = counts.select(
-                pl.col("instrument_id").repeat_by("n").explode(empty_as_null=False)
-            ).to_series()
-            repo.ingest(table=table, frame=_with_timestamp(combined).with_columns(instrument_id=instrument_ids))
+            repo.ingest(table=table, frame=_combine_pairs(pairs))
 
     def _ingest_target(self) -> tuple[str, int]:
         """Validate the model for ingestion and return where its rows go.
@@ -208,6 +181,72 @@ class TimeSeriesModel(ABC):
         if table is None:
             raise AttributeError(f"{type(self).__name__} must define table_name")  # noqa: TRY003
         return table, instrument_id
+
+
+def _pairs_by_table(items: Iterable[tuple[TimeSeriesModel, pl.DataFrame]]) -> dict[str, list[tuple[int, pl.DataFrame]]]:
+    """Validate each model and group its ``(instrument_id, frame)`` pair by table.
+
+    Args:
+        items: ``(model, frame)`` pairs, as passed to :meth:`TimeSeriesModel.ingest_many`.
+
+    Returns:
+        The pairs for each table, in the order they were given.
+
+    Raises:
+        ValidationError: If a model's instrument_id is not set.
+        AttributeError: If a model does not define table_name.
+    """
+    pairs_by_table: dict[str, list[tuple[int, pl.DataFrame]]] = {}
+    for model, frame in items:
+        table, instrument_id = model._ingest_target()
+        pairs_by_table.setdefault(table, []).append((instrument_id, frame))
+    return pairs_by_table
+
+
+def _check_same_columns(table: str, pairs: list[tuple[int, pl.DataFrame]]) -> None:
+    """Check that every frame bound for ``table`` has the same set of columns.
+
+    Args:
+        table: The destination table, for the error message.
+        pairs: The table's ``(instrument_id, frame)`` pairs.
+
+    Raises:
+        ValidationError: If two frames have different columns.
+    """
+    columns = pairs[0][1].columns
+    for _, frame in pairs[1:]:
+        if set(frame.columns) != set(columns):
+            raise ValidationError(  # noqa: TRY003
+                f"frames for table '{table}' have different columns: {sorted(columns)} vs {sorted(frame.columns)}"
+            )
+
+
+def _combine_pairs(pairs: list[tuple[int, pl.DataFrame]]) -> pl.DataFrame:
+    """Combine one table's pairs into a single frame ready to ingest.
+
+    Parses ts_event once for all frames and builds instrument_id in one step:
+    per-pair Polars calls cost ~0.1 ms each, which for 500 instruments would
+    dwarf the write itself.
+
+    Args:
+        pairs: The table's ``(instrument_id, frame)`` pairs, with equal column sets.
+
+    Returns:
+        The frames stacked in order, with 'timestamp' and 'instrument_id' columns added.
+    """
+    columns = pairs[0][1].columns
+    aligned = [frame if frame.columns == columns else frame.select(columns) for _, frame in pairs]
+    combined = pl.concat(aligned, how="vertical_relaxed", rechunk=True)
+    counts = pl.DataFrame(
+        {
+            "instrument_id": [instrument_id for instrument_id, _ in pairs],
+            "n": [frame.height for _, frame in pairs],
+        },
+        schema={"instrument_id": pl.Int64, "n": pl.Int64},
+    )
+    # empty_as_null=False: a pair with an empty frame contributes no row, not a NULL one.
+    instrument_ids = counts.select(pl.col("instrument_id").repeat_by("n").explode(empty_as_null=False)).to_series()
+    return _with_timestamp(combined).with_columns(instrument_id=instrument_ids)
 
 
 def _with_timestamp(frame: pl.DataFrame) -> pl.DataFrame:
