@@ -54,7 +54,7 @@ all reads and writes go through a `Table`.
 - Tests mirror the source tree (`tests/table/test__io.py` ↔ `src/ducktide/table/_io.py`).
 - Coverage must stay at 100% (`fail_under = 100` in `pyproject.toml`).
 - Every public module, class and function has a docstring (interrogate gate).
-- The README's code blocks are executed by the rhiza checks — keep them runnable, and
-  don't let them write into the repo root.
+- The README's examples are ```` ```pycon ```` doctests, run by `tests/test_readme.py` — keep
+  them runnable, and don't let them write into the repo root.
 - Dependencies carry lower bounds; `pyarrow` is runtime-only (DuckDB's `.pl()`), hence
   the deptry ignore.
