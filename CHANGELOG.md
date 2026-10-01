@@ -5,6 +5,17 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com),
 and entries are generated from [Conventional Commits](https://www.conventionalcommits.org).
 
+## [0.1.3] - 2026-10-01
+
+### Documentation
+- Write README examples as pycon doctests (#44)
+- State the model invariant TimeSeriesModel actually keeps (#46) (#52)
+
+### Maintenance
+- Split ingest_many and _key_columns into helpers (#47) (#51)
+- Drop the private _build_query patch from the query-error test (#48) (#50)
+- Run the README's pycon examples as doctests (#45) (#49)
+
 ## [0.1.2] - 2026-09-29
 
 ### Bug Fixes
